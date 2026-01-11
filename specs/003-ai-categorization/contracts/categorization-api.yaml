@@ -1,0 +1,482 @@
+openapi: 3.0.3
+info:
+  title: FinTrack Categorization API
+  description: API endpoints for AI-powered transaction categorization
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:8000
+    description: Local development server
+
+paths:
+  /api/transactions/{id}:
+    put:
+      summary: Update transaction (extended for category learning)
+      description: |
+        Updates a transaction. When category_id is changed, the system automatically
+        creates or updates a categorization rule based on the normalized merchant.
+      operationId: updateTransaction
+      tags:
+        - Transactions
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransactionUpdate'
+      responses:
+        '200':
+          description: Transaction updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionResponse'
+        '404':
+          description: Transaction not found
+        '422':
+          description: Validation error
+
+  /api/categorization/trigger:
+    post:
+      summary: Trigger categorization for uncategorized transactions
+      description: |
+        Manually triggers AI categorization for uncategorized transactions.
+        Applies learned rules first, then sends remaining transactions to AI.
+        Returns batch processing results.
+      operationId: triggerCategorization
+      tags:
+        - Categorization
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CategorizationTriggerRequest'
+      responses:
+        '200':
+          description: Categorization completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CategorizationBatchResponse'
+        '503':
+          description: AI service unavailable (transactions left uncategorized)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CategorizationBatchResponse'
+
+  /api/categorization/rules:
+    get:
+      summary: List all categorization rules
+      description: Returns all learned categorization rules ordered by creation date (newest first)
+      operationId: listCategorizationRules
+      tags:
+        - Categorization
+      parameters:
+        - name: category_id
+          in: query
+          required: false
+          description: Filter rules by category
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 100
+            minimum: 1
+            maximum: 500
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+      responses:
+        '200':
+          description: List of categorization rules
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CategorizationRuleListResponse'
+
+    post:
+      summary: Create a categorization rule manually
+      description: Creates a new categorization rule. Typically rules are auto-created when users change transaction categories.
+      operationId: createCategorizationRule
+      tags:
+        - Categorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CategorizationRuleCreate'
+      responses:
+        '201':
+          description: Rule created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CategorizationRuleResponse'
+        '409':
+          description: Rule with this merchant pattern already exists
+        '422':
+          description: Validation error
+
+  /api/categorization/rules/{id}:
+    get:
+      summary: Get a specific categorization rule
+      operationId: getCategorizationRule
+      tags:
+        - Categorization
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Rule details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CategorizationRuleResponse'
+        '404':
+          description: Rule not found
+
+    delete:
+      summary: Delete a categorization rule
+      description: Removes a learned rule. Does not affect already-categorized transactions.
+      operationId: deleteCategorizationRule
+      tags:
+        - Categorization
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Rule deleted successfully
+        '404':
+          description: Rule not found
+
+  /api/categorization/batches:
+    get:
+      summary: List categorization batch history
+      description: Returns processing history for observability and debugging
+      operationId: listCategorizationBatches
+      tags:
+        - Categorization
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+      responses:
+        '200':
+          description: List of categorization batches
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CategorizationBatchListResponse'
+
+  /api/categorization/normalize:
+    post:
+      summary: Preview merchant normalization
+      description: |
+        Utility endpoint to preview how a transaction description would be normalized.
+        Useful for testing and debugging normalization rules.
+      operationId: previewNormalization
+      tags:
+        - Categorization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NormalizationRequest'
+      responses:
+        '200':
+          description: Normalization result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NormalizationResponse'
+
+components:
+  schemas:
+    TransactionUpdate:
+      type: object
+      properties:
+        description:
+          type: string
+          maxLength: 500
+          description: Display description (user-editable)
+        category_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Category assignment. When changed, creates a categorization rule.
+        reviewed:
+          type: boolean
+          description: Mark transaction as reviewed
+        notes:
+          type: string
+          description: User notes
+
+    TransactionResponse:
+      type: object
+      required:
+        - id
+        - account_id
+        - date
+        - description
+        - amount
+        - reviewed
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        account_id:
+          type: string
+          format: uuid
+        account_name:
+          type: string
+        date:
+          type: string
+          format: date
+        description:
+          type: string
+        original_description:
+          type: string
+        normalized_merchant:
+          type: string
+          nullable: true
+        amount:
+          type: integer
+          description: Amount in cents
+        category_id:
+          type: string
+          format: uuid
+          nullable: true
+        category_name:
+          type: string
+          nullable: true
+        confidence_score:
+          type: number
+          format: float
+          nullable: true
+          minimum: 0
+          maximum: 1
+        categorization_source:
+          type: string
+          enum: [rule, ai, manual, none]
+          nullable: true
+        reviewed:
+          type: boolean
+        notes:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    CategorizationTriggerRequest:
+      type: object
+      properties:
+        transaction_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: |
+            Optional list of specific transaction IDs to categorize.
+            If omitted, categorizes all uncategorized transactions.
+        force_ai:
+          type: boolean
+          default: false
+          description: Skip rule matching and send directly to AI
+
+    CategorizationBatchResponse:
+      type: object
+      required:
+        - id
+        - transaction_count
+        - success_count
+        - failure_count
+        - rule_match_count
+        - ai_match_count
+        - skipped_count
+        - started_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        transaction_count:
+          type: integer
+          description: Total transactions processed
+        success_count:
+          type: integer
+          description: Successfully categorized
+        failure_count:
+          type: integer
+          description: Failed to categorize (parse errors, invalid responses)
+        rule_match_count:
+          type: integer
+          description: Categorized by learned rules
+        ai_match_count:
+          type: integer
+          description: Categorized by AI
+        skipped_count:
+          type: integer
+          description: AI confidence below threshold
+        duration_ms:
+          type: integer
+          nullable: true
+          description: Total processing time in milliseconds
+        error_message:
+          type: string
+          nullable: true
+          description: Error details if batch failed
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    CategorizationBatchListResponse:
+      type: object
+      required:
+        - batches
+        - total
+      properties:
+        batches:
+          type: array
+          items:
+            $ref: '#/components/schemas/CategorizationBatchResponse'
+        total:
+          type: integer
+        has_more:
+          type: boolean
+
+    CategorizationRuleCreate:
+      type: object
+      required:
+        - merchant_pattern
+        - category_id
+      properties:
+        merchant_pattern:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: Normalized merchant pattern to match (case-insensitive substring)
+        category_id:
+          type: string
+          format: uuid
+          description: Target category for matching transactions
+
+    CategorizationRuleResponse:
+      type: object
+      required:
+        - id
+        - merchant_pattern
+        - category_id
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        merchant_pattern:
+          type: string
+        category_id:
+          type: string
+          format: uuid
+        category_name:
+          type: string
+          description: Joined category name for display
+        created_at:
+          type: string
+          format: date-time
+
+    CategorizationRuleListResponse:
+      type: object
+      required:
+        - rules
+        - total
+      properties:
+        rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/CategorizationRuleResponse'
+        total:
+          type: integer
+        has_more:
+          type: boolean
+
+    NormalizationRequest:
+      type: object
+      required:
+        - description
+      properties:
+        description:
+          type: string
+          description: Raw transaction description to normalize
+
+    NormalizationResponse:
+      type: object
+      required:
+        - original
+        - normalized
+      properties:
+        original:
+          type: string
+          description: Input description
+        normalized:
+          type: string
+          description: Normalized merchant name
+        tokens_removed:
+          type: array
+          items:
+            type: string
+          description: Noise tokens that were removed
+
+tags:
+  - name: Transactions
+    description: Transaction management (extended)
+  - name: Categorization
+    description: AI categorization and rule management

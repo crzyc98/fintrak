@@ -1,0 +1,341 @@
+openapi: 3.1.0
+info:
+  title: FinTrack Review Workflow API
+  description: API endpoints for transaction review workflow
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:8000
+    description: Local development server
+
+paths:
+  /api/transactions/review-queue:
+    get:
+      summary: Get review queue
+      description: |
+        Retrieves unreviewed transactions grouped by day.
+        Returns transactions where reviewed=false, ordered by date descending.
+      operationId: getReviewQueue
+      tags:
+        - Review Workflow
+      parameters:
+        - name: limit
+          in: query
+          description: Maximum number of transactions to return (default 50, max 200)
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: offset
+          in: query
+          description: Number of transactions to skip for pagination
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: Grouped review queue
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewQueueResponse'
+              example:
+                groups:
+                  - date_label: "Today"
+                    date: "2026-01-11"
+                    transactions:
+                      - id: "uuid-1"
+                        description: "Starbucks"
+                        amount: -450
+                        category_name: "Coffee"
+                        category_emoji: "☕"
+                  - date_label: "Yesterday"
+                    date: "2026-01-10"
+                    transactions:
+                      - id: "uuid-2"
+                        description: "Amazon"
+                        amount: -2999
+                        category_name: null
+                        category_emoji: null
+                total_count: 25
+                displayed_count: 2
+                has_more: true
+
+  /api/transactions/review-queue/count:
+    get:
+      summary: Get review queue count
+      description: Returns the count of unreviewed transactions without fetching full data
+      operationId: getReviewQueueCount
+      tags:
+        - Review Workflow
+      responses:
+        '200':
+          description: Count of unreviewed transactions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewQueueCountResponse'
+              example:
+                count: 25
+
+  /api/transactions/bulk:
+    post:
+      summary: Bulk update transactions
+      description: |
+        Performs bulk operations on multiple transactions atomically.
+        All operations succeed or all fail (no partial updates).
+
+        Supported operations:
+        - mark_reviewed: Sets reviewed=true and reviewed_at=now
+        - set_category: Updates category_id and sets categorization_source='manual'
+        - add_note: Appends note text to existing notes (with newline separator)
+      operationId: bulkUpdateTransactions
+      tags:
+        - Review Workflow
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkOperationRequest'
+            examples:
+              mark_reviewed:
+                summary: Mark transactions as reviewed
+                value:
+                  transaction_ids: ["uuid-1", "uuid-2", "uuid-3"]
+                  operation: "mark_reviewed"
+              set_category:
+                summary: Assign category to transactions
+                value:
+                  transaction_ids: ["uuid-1", "uuid-2"]
+                  operation: "set_category"
+                  category_id: "category-uuid"
+              add_note:
+                summary: Add note to transactions
+                value:
+                  transaction_ids: ["uuid-1"]
+                  operation: "add_note"
+                  note: "Business expense - Q1 conference"
+      responses:
+        '200':
+          description: Bulk operation successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkOperationResponse'
+              example:
+                success: true
+                affected_count: 3
+                operation: "mark_reviewed"
+                transaction_ids: ["uuid-1", "uuid-2", "uuid-3"]
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                too_many:
+                  summary: Too many transactions
+                  value:
+                    detail: "Maximum 500 transactions per bulk operation"
+                missing_category:
+                  summary: Missing category_id
+                  value:
+                    detail: "category_id required for set_category operation"
+                invalid_category:
+                  summary: Invalid category
+                  value:
+                    detail: "Category not found: invalid-uuid"
+        '404':
+          description: Transaction not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                detail: "Transactions not found: uuid-invalid-1, uuid-invalid-2"
+
+components:
+  schemas:
+    ReviewQueueResponse:
+      type: object
+      required:
+        - groups
+        - total_count
+        - displayed_count
+        - has_more
+      properties:
+        groups:
+          type: array
+          items:
+            $ref: '#/components/schemas/DateGroupedTransactions'
+        total_count:
+          type: integer
+          description: Total number of unreviewed transactions
+        displayed_count:
+          type: integer
+          description: Number of transactions in this response
+        has_more:
+          type: boolean
+          description: Whether more transactions are available
+
+    DateGroupedTransactions:
+      type: object
+      required:
+        - date_label
+        - date
+        - transactions
+      properties:
+        date_label:
+          type: string
+          description: Human-readable date label (Today, Yesterday, Jan 8)
+          examples: ["Today", "Yesterday", "Jan 8"]
+        date:
+          type: string
+          format: date
+          description: Actual date in ISO format
+        transactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/TransactionResponse'
+
+    TransactionResponse:
+      type: object
+      required:
+        - id
+        - account_id
+        - date
+        - description
+        - original_description
+        - amount
+        - reviewed
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        account_id:
+          type: string
+          format: uuid
+        date:
+          type: string
+          format: date
+        description:
+          type: string
+        original_description:
+          type: string
+        amount:
+          type: integer
+          description: Amount in cents (negative for expenses)
+        category_id:
+          type: string
+          format: uuid
+          nullable: true
+        reviewed:
+          type: boolean
+        reviewed_at:
+          type: string
+          format: date-time
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        normalized_merchant:
+          type: string
+          nullable: true
+        confidence_score:
+          type: number
+          format: float
+          nullable: true
+        categorization_source:
+          type: string
+          enum: [rule, ai, manual, none]
+          nullable: true
+        account_name:
+          type: string
+          nullable: true
+        category_name:
+          type: string
+          nullable: true
+        category_emoji:
+          type: string
+          nullable: true
+
+    ReviewQueueCountResponse:
+      type: object
+      required:
+        - count
+      properties:
+        count:
+          type: integer
+          minimum: 0
+
+    BulkOperationRequest:
+      type: object
+      required:
+        - transaction_ids
+        - operation
+      properties:
+        transaction_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          minItems: 1
+          maxItems: 500
+          description: List of transaction IDs to update
+        operation:
+          type: string
+          enum: [mark_reviewed, set_category, add_note]
+          description: Operation to perform
+        category_id:
+          type: string
+          format: uuid
+          description: Required for set_category operation
+        note:
+          type: string
+          maxLength: 1000
+          description: Required for add_note operation
+
+    BulkOperationResponse:
+      type: object
+      required:
+        - success
+        - affected_count
+        - operation
+        - transaction_ids
+      properties:
+        success:
+          type: boolean
+        affected_count:
+          type: integer
+          minimum: 0
+        operation:
+          type: string
+          enum: [mark_reviewed, set_category, add_note]
+        transaction_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+
+    ErrorResponse:
+      type: object
+      required:
+        - detail
+      properties:
+        detail:
+          type: string
+          description: Error message
+
+tags:
+  - name: Review Workflow
+    description: Endpoints for transaction review workflow

@@ -1,202 +1,666 @@
-
-import React, { useState, useMemo } from 'react';
-import { MOCK_TRANSACTIONS } from '../mockData';
-import { Transaction } from '../types';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Account, Category } from '../types';
+import {
+  fetchTransactions,
+  updateTransaction,
+  deleteTransaction,
+  fetchAccounts,
+  fetchCategories,
+  TransactionData,
+  TransactionFiltersData,
+} from '../src/services/api';
 
 const TransactionsView: React.FC = () => {
-  const [selectedTxId, setSelectedTxId] = useState<string | null>('t2'); // YouTube TV selected by default for demo
-  const [searchQuery, setSearchQuery] = useState('');
+  // Transaction state
+  const [transactions, setTransactions] = useState<TransactionData[]>([]);
+  const [total, setTotal] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const selectedTx = useMemo(() => 
-    MOCK_TRANSACTIONS.find(t => t.id === selectedTxId), 
-  [selectedTxId]);
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [limit] = useState(50);
 
-  // Simple grouping: Month -> Date -> Txs
-  const groupedTransactions = useMemo(() => {
-    const months: Record<string, Record<string, Transaction[]>> = {};
-    MOCK_TRANSACTIONS.forEach(tx => {
-      if (!months[tx.month]) months[tx.month] = {};
-      if (!months[tx.month][tx.displayDate]) months[tx.month][tx.displayDate] = [];
-      months[tx.month][tx.displayDate].push(tx);
-    });
-    return months;
+  // Filter state
+  const [filters, setFilters] = useState<TransactionFiltersData>({});
+  const [showFilters, setShowFilters] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [searchDebounce, setSearchDebounce] = useState<NodeJS.Timeout | null>(null);
+
+  // Reference data
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+
+  // Edit state
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingField, setEditingField] = useState<'category' | 'notes' | null>(null);
+  const [editValue, setEditValue] = useState<string>('');
+
+  // Delete confirmation
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+
+  // Load reference data
+  useEffect(() => {
+    const loadReferenceData = async () => {
+      try {
+        const [accountsData, categoriesData] = await Promise.all([
+          fetchAccounts(),
+          fetchCategories(),
+        ]);
+        setAccounts(accountsData);
+        setCategories(categoriesData);
+      } catch (err) {
+        console.error('Failed to load reference data:', err);
+      }
+    };
+    loadReferenceData();
   }, []);
 
-  return (
-    <div className="flex h-full -mt-4 -mx-10 overflow-hidden bg-[#050910]">
-      {/* Main List Area */}
-      <div className={`flex-1 flex flex-col min-w-0 border-r border-white/5`}>
-        {/* Header toolbar */}
-        <div className="px-8 py-4 flex items-center justify-between border-b border-white/5">
-          <div className="flex items-center space-x-4">
-             <div className="flex items-center text-sm font-semibold text-gray-300">
-               <input type="checkbox" className="mr-3 w-4 h-4 bg-transparent border-white/20 rounded" />
-               Transactions
-             </div>
-          </div>
-          <div className="flex items-center space-x-4">
-            <button className="text-gray-500 hover:text-white"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg></button>
-            <button className="text-gray-500 hover:text-white"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg></button>
-            <div className="relative">
-              <input 
-                type="text" 
-                placeholder="Search" 
-                className="bg-[#0a0f1d] border border-white/5 rounded-lg pl-8 pr-4 py-1.5 text-xs font-medium w-48 focus:w-64 transition-all focus:outline-none"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-              <svg className="w-4 h-4 absolute left-2.5 top-2 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
-            </div>
-            <button className="text-gray-500 hover:text-white"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16m-7 6h7"></path></svg></button>
-          </div>
-        </div>
+  // Load transactions
+  const loadTransactions = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      const offset = (currentPage - 1) * limit;
+      const response = await fetchTransactions({
+        ...filters,
+        limit,
+        offset,
+      });
+      setTransactions(response.items);
+      setTotal(response.total);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load transactions');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [currentPage, limit, filters]);
 
-        {/* Scrollable Feed */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar px-8 py-6">
-          {Object.entries(groupedTransactions).map(([month, dates]) => (
-            <div key={month} className="mb-10">
-              <div className="flex justify-between items-baseline mb-4">
-                <h2 className="text-2xl font-bold text-white tracking-tight">{month}</h2>
-                <span className="text-xl font-bold text-white tabular-nums">$1,901.67</span>
-              </div>
-              
-              {Object.entries(dates).map(([date, txs]) => (
-                <div key={date} className="mb-6">
-                  <h3 className="text-[11px] font-bold text-blue-400/80 mb-4">{date}</h3>
-                  <div className="space-y-1">
-                    {txs.map(tx => (
-                      <div 
-                        key={tx.id} 
-                        onClick={() => setSelectedTxId(tx.id)}
-                        className={`group relative flex items-center px-4 py-3 rounded-lg cursor-pointer transition-all ${
-                          selectedTxId === tx.id ? 'bg-[#3b82f6]/10' : 'hover:bg-white/5'
-                        }`}
-                      >
-                        {selectedTxId === tx.id && (
-                          <div className="absolute left-0 top-2 bottom-2 w-0.5 bg-blue-500 rounded-full" />
-                        )}
-                        <input type="checkbox" className="mr-4 w-4 h-4 bg-transparent border-white/10 rounded cursor-pointer" onClick={(e) => e.stopPropagation()} />
-                        <div className="flex-1 flex items-center justify-between min-w-0 pr-4">
-                          <div className="flex flex-col min-w-0">
-                            <div className="flex items-center">
-                              <span className="text-sm font-semibold text-gray-100 truncate mr-2">{tx.merchant}</span>
-                              <span className="text-xs font-medium text-gray-500 truncate">{tx.accountName}</span>
-                            </div>
-                          </div>
-                          <div className="flex items-center space-x-6">
-                             <div className={`flex items-center px-2 py-0.5 rounded-full text-[10px] font-black tracking-widest ${tx.categoryColor}`}>
-                               <span className="mr-1">{tx.categoryIcon || '🔹'}</span>
-                               {tx.category}
-                             </div>
-                             <div className="flex items-center">
-                               <span className={`text-sm font-bold tabular-nums ${tx.amount > 0 ? 'text-green-500' : 'text-white'}`}>
-                                 {tx.amount > 0 ? `$${tx.amount.toFixed(2)}` : `$${Math.abs(tx.amount).toFixed(2)}`}
-                               </span>
-                               <div className="ml-3 flex space-x-0.5">
-                                 <div className="w-1 h-1 rounded-full bg-blue-500/50" />
-                                 <div className="w-1 h-1 rounded-full bg-blue-500/50" />
-                               </div>
-                             </div>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ))}
+  useEffect(() => {
+    loadTransactions();
+  }, [loadTransactions]);
+
+  // Search debounce
+  useEffect(() => {
+    if (searchDebounce) {
+      clearTimeout(searchDebounce);
+    }
+    const timeout = setTimeout(() => {
+      setFilters((prev) => ({ ...prev, search: searchTerm || undefined }));
+      setCurrentPage(1);
+    }, 300);
+    setSearchDebounce(timeout);
+    return () => clearTimeout(timeout);
+  }, [searchTerm]);
+
+  // Formatting helpers
+  const formatAmount = (cents: number): string => {
+    const dollars = cents / 100;
+    const formatted = Math.abs(dollars).toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    return cents < 0 ? `-$${formatted}` : `$${formatted}`;
+  };
+
+  const formatDate = (dateStr: string): string => {
+    const date = new Date(dateStr + 'T00:00:00');
+    return date.toLocaleDateString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  };
+
+  // Pagination
+  const totalPages = Math.ceil(total / limit);
+  const canGoPrev = currentPage > 1;
+  const canGoNext = currentPage < totalPages;
+
+  // Filter handlers
+  const handleFilterChange = (key: keyof TransactionFiltersData, value: string | boolean | undefined) => {
+    setFilters((prev) => {
+      const newFilters = { ...prev };
+      if (value === '' || value === undefined) {
+        delete newFilters[key];
+      } else {
+        (newFilters as Record<string, unknown>)[key] = value;
+      }
+      return newFilters;
+    });
+    setCurrentPage(1);
+  };
+
+  const clearFilters = () => {
+    setFilters({});
+    setSearchTerm('');
+    setCurrentPage(1);
+  };
+
+  const hasActiveFilters =
+    Object.keys(filters).filter((k) => k !== 'limit' && k !== 'offset').length > 0 || searchTerm;
+
+  // Edit handlers
+  const handleCategoryEdit = (transaction: TransactionData) => {
+    setEditingId(transaction.id);
+    setEditingField('category');
+    setEditValue(transaction.category_id || '');
+  };
+
+  const handleNotesEdit = (transaction: TransactionData) => {
+    setEditingId(transaction.id);
+    setEditingField('notes');
+    setEditValue(transaction.notes || '');
+  };
+
+  const handleCategoryChange = async (transactionId: string, categoryId: string | null) => {
+    try {
+      await updateTransaction(transactionId, { category_id: categoryId });
+      setTransactions((prev) =>
+        prev.map((t) =>
+          t.id === transactionId
+            ? {
+                ...t,
+                category_id: categoryId,
+                category_name: categories.find((c) => c.id === categoryId)?.name || null,
+                category_emoji: categories.find((c) => c.id === categoryId)?.emoji || null,
+              }
+            : t
+        )
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update category');
+    }
+    setEditingId(null);
+    setEditingField(null);
+  };
+
+  const handleNotesSave = async (transactionId: string) => {
+    try {
+      await updateTransaction(transactionId, { notes: editValue || null });
+      setTransactions((prev) =>
+        prev.map((t) => (t.id === transactionId ? { ...t, notes: editValue || null } : t))
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update notes');
+    }
+    setEditingId(null);
+    setEditingField(null);
+  };
+
+  const handleReviewToggle = async (transaction: TransactionData) => {
+    try {
+      const newReviewed = !transaction.reviewed;
+      await updateTransaction(transaction.id, { reviewed: newReviewed });
+      setTransactions((prev) =>
+        prev.map((t) =>
+          t.id === transaction.id
+            ? { ...t, reviewed: newReviewed, reviewed_at: newReviewed ? new Date().toISOString() : null }
+            : t
+        )
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update review status');
+    }
+  };
+
+  const handleDelete = async (transactionId: string) => {
+    try {
+      await deleteTransaction(transactionId);
+      setTransactions((prev) => prev.filter((t) => t.id !== transactionId));
+      setTotal((prev) => prev - 1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete transaction');
+    }
+    setDeleteConfirm(null);
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditingField(null);
+    setEditValue('');
+  };
+
+  if (isLoading && transactions.length === 0) {
+    return (
+      <div className="flex h-full items-center justify-center bg-[#050910]">
+        <div className="text-gray-500">Loading transactions...</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-full -mt-4 -mx-10 bg-[#050910]">
+      {/* Header */}
+      <div className="px-8 py-4 flex items-center justify-between border-b border-white/5">
+        <h1 className="text-sm font-bold text-gray-300">Transactions</h1>
+        <div className="flex items-center space-x-4">
+          {/* Search */}
+          <div className="relative">
+            <input
+              type="text"
+              placeholder="Search transactions..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-64 bg-[#0a0f1d] border border-white/5 rounded-xl py-2 pl-10 pr-4 text-sm font-medium focus:outline-none focus:ring-1 focus:ring-blue-500/50 placeholder-gray-600 text-gray-300"
+            />
+            <svg
+              className="w-4 h-4 absolute left-3.5 top-2.5 text-gray-500"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2.5"
+                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+              />
+            </svg>
+          </div>
+
+          {/* Filter Toggle */}
+          <button
+            onClick={() => setShowFilters(!showFilters)}
+            className={`p-2 rounded-lg transition-colors ${
+              showFilters || hasActiveFilters
+                ? 'bg-blue-500/20 text-blue-400'
+                : 'text-gray-500 hover:text-white hover:bg-white/5'
+            }`}
+            title="Filters"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
+                d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"
+              />
+            </svg>
+          </button>
         </div>
       </div>
 
-      {/* Right Detail Pane */}
-      <div className="w-[400px] flex flex-col bg-[#050910] overflow-y-auto custom-scrollbar">
-        {selectedTx ? (
-          <div className="p-8">
-            <div className="flex justify-between items-center mb-8">
-              <span className="text-[11px] font-bold text-gray-500 uppercase tracking-widest">Recurring transaction</span>
-              <div className="flex space-x-2">
-                <button className="p-1.5 hover:bg-white/5 rounded-lg text-gray-500"><svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M6 10a2 2 0 11-4 0 2 2 0 014 0zM12 10a2 2 0 11-4 0 2 2 0 014 0zM16 12a2 2 0 100-4 2 2 0 000 4z"></path></svg></button>
-                <button className="bg-[#3b82f6] text-white px-4 py-1.5 rounded-lg text-xs font-bold shadow-lg shadow-blue-500/20">Review</button>
-              </div>
+      {/* Filter Panel */}
+      {showFilters && (
+        <div className="px-8 py-4 border-b border-white/5 bg-[#0a0f1d]/50">
+          <div className="flex flex-wrap gap-4 items-end">
+            {/* Account Filter */}
+            <div>
+              <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">
+                Account
+              </label>
+              <select
+                value={filters.account_id || ''}
+                onChange={(e) => handleFilterChange('account_id', e.target.value || undefined)}
+                className="bg-[#0a0f1d] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none focus:ring-1 focus:ring-blue-500/50"
+              >
+                <option value="">All Accounts</option>
+                {accounts.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.name}
+                  </option>
+                ))}
+              </select>
             </div>
 
-            <div className="mb-10">
-              <span className="text-[11px] font-bold text-blue-400 mb-2 block">{selectedTx.displayDate}</span>
-              <h3 className="text-3xl font-black text-white mb-2 tracking-tight">{selectedTx.merchant}</h3>
-              <div className="flex items-center text-gray-400 mb-4">
-                <div className="w-4 h-4 rounded-full bg-blue-500/40 mr-2" />
-                <span className="text-sm font-semibold">{selectedTx.accountName}</span>
-              </div>
-              <div className="text-3xl font-black text-white tracking-tighter">
-                ${Math.abs(selectedTx.amount).toFixed(2)}
-              </div>
+            {/* Category Filter */}
+            <div>
+              <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">
+                Category
+              </label>
+              <select
+                value={filters.category_id || ''}
+                onChange={(e) => handleFilterChange('category_id', e.target.value || undefined)}
+                className="bg-[#0a0f1d] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none focus:ring-1 focus:ring-blue-500/50"
+              >
+                <option value="">All Categories</option>
+                {categories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.emoji} {category.name}
+                  </option>
+                ))}
+              </select>
             </div>
 
-            <div className="space-y-6">
-              <div className="flex items-center justify-between group cursor-pointer p-2 -m-2 hover:bg-white/5 rounded-xl">
-                 <span className="text-sm font-semibold text-gray-500">Category</span>
-                 <div className={`flex items-center px-3 py-1 rounded-full text-[10px] font-black tracking-widest ${selectedTx.categoryColor}`}>
-                    <span className="mr-1.5">{selectedTx.categoryIcon}</span>
-                    {selectedTx.category}
-                    <svg className="w-3 h-3 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7"></path></svg>
-                 </div>
-              </div>
-              
-              <div className="flex items-center justify-between group cursor-pointer p-2 -m-2 hover:bg-white/5 rounded-xl">
-                 <span className="text-sm font-semibold text-gray-500">Recurring</span>
-                 <div className="flex items-center text-xs font-bold text-gray-300">
-                    <span className="bg-gray-800/50 p-1 rounded mr-2">🅁</span>
-                    {selectedTx.merchant}
-                    <svg className="w-3 h-3 ml-2 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7"></path></svg>
-                 </div>
-              </div>
-
-              <div className="flex items-center justify-between group cursor-pointer p-2 -m-2 hover:bg-white/5 rounded-xl">
-                 <span className="text-sm font-semibold text-gray-500">Tags</span>
-                 <button className="w-6 h-6 rounded-full border border-dashed border-gray-700 flex items-center justify-center text-gray-500 hover:border-gray-500">+</button>
-              </div>
-
-              <div className="pt-4">
-                <textarea 
-                  placeholder="Add a note..." 
-                  className="w-full bg-transparent border-none p-0 text-sm font-medium text-gray-300 focus:ring-0 placeholder-gray-700 resize-none h-24"
-                />
-              </div>
+            {/* Date From */}
+            <div>
+              <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">
+                From
+              </label>
+              <input
+                type="date"
+                value={filters.date_from || ''}
+                onChange={(e) => handleFilterChange('date_from', e.target.value || undefined)}
+                className="bg-[#0a0f1d] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none focus:ring-1 focus:ring-blue-500/50"
+              />
             </div>
 
-            {/* Transaction History Section */}
-            <div className="mt-12 border-t border-white/5 pt-8">
-              <div className="flex justify-between items-baseline mb-6">
-                <h4 className="text-sm font-bold text-white tracking-tight">March 2023</h4>
-                <span className="text-sm font-bold text-white tabular-nums">$139.08</span>
-              </div>
-              <div className="space-y-6">
-                <div className="text-[10px] font-bold text-blue-400/80 mb-4 uppercase tracking-widest">Wednesday, March 29</div>
-                <div className="flex items-center justify-between">
-                   <div className="flex items-center">
-                     <input type="checkbox" className="mr-4 w-4 h-4 bg-transparent border-white/10 rounded" />
-                     <div className="flex flex-col">
-                       <span className="text-sm font-bold text-gray-200">{selectedTx.merchant}</span>
-                     </div>
-                   </div>
-                   <div className="flex items-center space-x-4">
-                      <div className="bg-pink-500/10 text-pink-400 text-[9px] font-black px-2 py-0.5 rounded-full tracking-widest flex items-center">
-                        🛍️ SHOP...
-                      </div>
-                      <span className="text-sm font-bold text-white tabular-nums">$69.54</span>
-                      <div className="w-1 h-1 rounded-full bg-blue-500/50" />
-                   </div>
-                </div>
-              </div>
+            {/* Date To */}
+            <div>
+              <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">
+                To
+              </label>
+              <input
+                type="date"
+                value={filters.date_to || ''}
+                onChange={(e) => handleFilterChange('date_to', e.target.value || undefined)}
+                className="bg-[#0a0f1d] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none focus:ring-1 focus:ring-blue-500/50"
+              />
             </div>
+
+            {/* Reviewed Filter */}
+            <div>
+              <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">
+                Status
+              </label>
+              <select
+                value={filters.reviewed === undefined ? '' : filters.reviewed.toString()}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  handleFilterChange('reviewed', val === '' ? undefined : val === 'true');
+                }}
+                className="bg-[#0a0f1d] border border-white/10 rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none focus:ring-1 focus:ring-blue-500/50"
+              >
+                <option value="">All</option>
+                <option value="true">Reviewed</option>
+                <option value="false">Unreviewed</option>
+              </select>
+            </div>
+
+            {/* Clear Filters */}
+            {hasActiveFilters && (
+              <button
+                onClick={clearFilters}
+                className="px-4 py-2 text-sm font-medium text-gray-400 hover:text-white transition-colors"
+              >
+                Clear Filters
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Error Banner */}
+      {error && (
+        <div className="mx-8 mt-4 p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm flex items-center justify-between">
+          <span>{error}</span>
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={loadTransactions}
+              className="px-3 py-1 text-sm font-medium text-red-300 hover:text-white border border-red-500/30 rounded-lg transition-colors"
+            >
+              Retry
+            </button>
+            <button onClick={() => setError(null)} className="text-red-300 hover:text-white">
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Transaction Table */}
+      <div className="flex-1 overflow-auto px-8 py-4">
+        {transactions.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full text-center">
+            <svg
+              className="w-16 h-16 text-gray-700 mb-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="1.5"
+                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+              />
+            </svg>
+            <p className="text-gray-500 font-medium mb-2">
+              {hasActiveFilters ? 'No transactions match your filters' : 'No transactions yet'}
+            </p>
+            <p className="text-gray-600 text-sm">
+              {hasActiveFilters
+                ? 'Try adjusting your filters or search term'
+                : 'Import transactions from a CSV file to get started'}
+            </p>
           </div>
         ) : (
-          <div className="flex-1 flex items-center justify-center text-gray-600 text-sm font-medium">
-            Select a transaction to review details
-          </div>
+          <table className="w-full">
+            <thead>
+              <tr className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">
+                <th className="text-left py-3 px-4 w-8">
+                  <span className="sr-only">Review</span>
+                </th>
+                <th className="text-left py-3 px-4">Date</th>
+                <th className="text-left py-3 px-4">Description</th>
+                <th className="text-left py-3 px-4">Category</th>
+                <th className="text-left py-3 px-4">Account</th>
+                <th className="text-right py-3 px-4">Amount</th>
+                <th className="text-center py-3 px-4 w-8">
+                  <span className="sr-only">Notes</span>
+                </th>
+                <th className="text-center py-3 px-4 w-8">
+                  <span className="sr-only">Actions</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/5">
+              {transactions.map((transaction) => (
+                <tr
+                  key={transaction.id}
+                  className={`group hover:bg-white/5 transition-colors ${
+                    transaction.reviewed ? 'opacity-60' : ''
+                  }`}
+                >
+                  {/* Review Toggle */}
+                  <td className="py-3 px-4">
+                    <button
+                      onClick={() => handleReviewToggle(transaction)}
+                      className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
+                        transaction.reviewed
+                          ? 'bg-green-500 border-green-500 text-white'
+                          : 'border-gray-600 hover:border-gray-400'
+                      }`}
+                      title={transaction.reviewed ? 'Mark as unreviewed' : 'Mark as reviewed'}
+                    >
+                      {transaction.reviewed && (
+                        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                          <path
+                            fillRule="evenodd"
+                            d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                            clipRule="evenodd"
+                          />
+                        </svg>
+                      )}
+                    </button>
+                  </td>
+
+                  {/* Date */}
+                  <td className="py-3 px-4 text-sm text-gray-400 whitespace-nowrap">
+                    {formatDate(transaction.date)}
+                  </td>
+
+                  {/* Description */}
+                  <td className="py-3 px-4">
+                    <div className="text-sm font-medium text-white truncate max-w-xs">
+                      {transaction.normalized_merchant || transaction.description}
+                    </div>
+                    {(transaction.normalized_merchant || transaction.description) !== transaction.original_description && (
+                      <div className="text-xs text-gray-600 truncate max-w-xs" title={transaction.original_description}>
+                        {transaction.original_description}
+                      </div>
+                    )}
+                  </td>
+
+                  {/* Category */}
+                  <td className="py-3 px-4">
+                    {editingId === transaction.id && editingField === 'category' ? (
+                      <select
+                        value={editValue}
+                        onChange={(e) => handleCategoryChange(transaction.id, e.target.value || null)}
+                        onBlur={cancelEdit}
+                        autoFocus
+                        className="bg-[#0a0f1d] border border-blue-500/50 rounded px-2 py-1 text-sm text-gray-300 focus:outline-none"
+                      >
+                        <option value="">Uncategorized</option>
+                        {categories.map((cat) => (
+                          <option key={cat.id} value={cat.id}>
+                            {cat.emoji} {cat.name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <button
+                        onClick={() => handleCategoryEdit(transaction)}
+                        className="text-sm text-gray-400 hover:text-white transition-colors text-left"
+                      >
+                        {transaction.category_id ? (
+                          <span>
+                            {transaction.category_emoji} {transaction.category_name}
+                          </span>
+                        ) : (
+                          <span className="text-gray-600 italic">Uncategorized</span>
+                        )}
+                      </button>
+                    )}
+                  </td>
+
+                  {/* Account */}
+                  <td className="py-3 px-4 text-sm text-gray-400">
+                    {transaction.account_name || '--'}
+                  </td>
+
+                  {/* Amount */}
+                  <td className="py-3 px-4 text-right">
+                    <span
+                      className={`text-sm font-bold tabular-nums ${
+                        transaction.amount < 0 ? 'text-red-400' : 'text-green-400'
+                      }`}
+                    >
+                      {formatAmount(transaction.amount)}
+                    </span>
+                  </td>
+
+                  {/* Notes Indicator */}
+                  <td className="py-3 px-4 text-center">
+                    {editingId === transaction.id && editingField === 'notes' ? (
+                      <input
+                        type="text"
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        onBlur={() => handleNotesSave(transaction.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleNotesSave(transaction.id);
+                          if (e.key === 'Escape') cancelEdit();
+                        }}
+                        autoFocus
+                        placeholder="Add note..."
+                        className="w-32 bg-[#0a0f1d] border border-blue-500/50 rounded px-2 py-1 text-sm text-gray-300 focus:outline-none"
+                      />
+                    ) : (
+                      <button
+                        onClick={() => handleNotesEdit(transaction)}
+                        className={`p-1 rounded transition-colors ${
+                          transaction.notes
+                            ? 'text-yellow-500 hover:text-yellow-400'
+                            : 'text-gray-600 hover:text-gray-400 opacity-0 group-hover:opacity-100'
+                        }`}
+                        title={transaction.notes || 'Add note'}
+                      >
+                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                          <path d="M18 13V5a2 2 0 00-2-2H4a2 2 0 00-2 2v8a2 2 0 002 2h3l3 3 3-3h3a2 2 0 002-2zM5 7a1 1 0 011-1h8a1 1 0 110 2H6a1 1 0 01-1-1zm1 3a1 1 0 100 2h3a1 1 0 100-2H6z" />
+                        </svg>
+                      </button>
+                    )}
+                  </td>
+
+                  {/* Delete Button */}
+                  <td className="py-3 px-4 text-center">
+                    <button
+                      onClick={() => setDeleteConfirm(transaction.id)}
+                      className="p-1 rounded text-gray-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all"
+                      title="Delete transaction"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="2"
+                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                        />
+                      </svg>
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
       </div>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="px-8 py-4 flex items-center justify-between border-t border-white/5">
+          <div className="text-sm text-gray-500">
+            Showing {(currentPage - 1) * limit + 1} to {Math.min(currentPage * limit, total)} of{' '}
+            {total.toLocaleString()} transactions
+          </div>
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={() => setCurrentPage((p) => p - 1)}
+              disabled={!canGoPrev}
+              className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                canGoPrev
+                  ? 'text-gray-300 hover:bg-white/5'
+                  : 'text-gray-600 cursor-not-allowed'
+              }`}
+            >
+              Previous
+            </button>
+            <span className="text-sm text-gray-400">
+              Page {currentPage} of {totalPages}
+            </span>
+            <button
+              onClick={() => setCurrentPage((p) => p + 1)}
+              disabled={!canGoNext}
+              className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                canGoNext
+                  ? 'text-gray-300 hover:bg-white/5'
+                  : 'text-gray-600 cursor-not-allowed'
+              }`}
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deleteConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-[#0a0f1d] border border-white/10 rounded-2xl p-8 w-full max-w-md">
+            <h2 className="text-xl font-bold text-white mb-4">Delete Transaction?</h2>
+            <p className="text-gray-400 mb-6">
+              Are you sure you want to delete this transaction? This action cannot be undone.
+            </p>
+            <div className="flex space-x-4">
+              <button
+                onClick={() => setDeleteConfirm(null)}
+                className="flex-1 px-4 py-3 text-sm font-bold text-gray-400 hover:text-white border border-white/10 rounded-xl transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleDelete(deleteConfirm)}
+                className="flex-1 px-4 py-3 text-sm font-bold text-white bg-red-500 hover:bg-red-600 rounded-xl transition-colors"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

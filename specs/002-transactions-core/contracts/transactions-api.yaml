@@ -1,0 +1,340 @@
+openapi: 3.0.3
+info:
+  title: FinTrack Transactions API
+  description: API endpoints for managing financial transactions
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:8000/api
+    description: Local development server
+
+paths:
+  /transactions:
+    get:
+      summary: List transactions with filtering and pagination
+      description: |
+        Returns a paginated list of transactions with optional filtering.
+        Results are sorted by date descending (most recent first).
+      operationId: listTransactions
+      tags:
+        - Transactions
+      parameters:
+        - name: account_id
+          in: query
+          description: Filter by account ID
+          schema:
+            type: string
+            format: uuid
+        - name: category_id
+          in: query
+          description: Filter by category ID (use "null" for uncategorized)
+          schema:
+            type: string
+        - name: date_from
+          in: query
+          description: Filter transactions on or after this date
+          schema:
+            type: string
+            format: date
+            example: "2026-01-01"
+        - name: date_to
+          in: query
+          description: Filter transactions on or before this date
+          schema:
+            type: string
+            format: date
+            example: "2026-12-31"
+        - name: amount_min
+          in: query
+          description: Filter transactions with amount >= this value (in cents)
+          schema:
+            type: integer
+            example: -10000
+        - name: amount_max
+          in: query
+          description: Filter transactions with amount <= this value (in cents)
+          schema:
+            type: integer
+            example: 10000
+        - name: reviewed
+          in: query
+          description: Filter by review status
+          schema:
+            type: boolean
+        - name: search
+          in: query
+          description: Search in transaction description (case-insensitive)
+          schema:
+            type: string
+            maxLength: 100
+        - name: limit
+          in: query
+          description: Maximum number of transactions to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: offset
+          in: query
+          description: Number of transactions to skip
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: Paginated list of transactions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionListResponse'
+        '400':
+          description: Invalid filter parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /transactions/{transaction_id}:
+    get:
+      summary: Get a single transaction
+      operationId: getTransaction
+      tags:
+        - Transactions
+      parameters:
+        - name: transaction_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Transaction details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction'
+        '404':
+          description: Transaction not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    put:
+      summary: Update a transaction
+      description: |
+        Update editable fields of a transaction. Only provided fields are updated.
+        When reviewed is set to true, reviewed_at is automatically set.
+        When reviewed is set to false, reviewed_at is automatically cleared.
+      operationId: updateTransaction
+      tags:
+        - Transactions
+      parameters:
+        - name: transaction_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransactionUpdate'
+      responses:
+        '200':
+          description: Updated transaction
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Transaction'
+        '400':
+          description: Invalid update data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Transaction not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      summary: Delete a transaction
+      operationId: deleteTransaction
+      tags:
+        - Transactions
+      parameters:
+        - name: transaction_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Transaction deleted successfully
+        '404':
+          description: Transaction not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  schemas:
+    Transaction:
+      type: object
+      required:
+        - id
+        - account_id
+        - date
+        - description
+        - original_description
+        - amount
+        - reviewed
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique transaction identifier
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        account_id:
+          type: string
+          format: uuid
+          description: ID of the associated account
+          example: "550e8400-e29b-41d4-a716-446655440001"
+        date:
+          type: string
+          format: date
+          description: Transaction date
+          example: "2026-01-11"
+        description:
+          type: string
+          maxLength: 500
+          description: User-editable transaction description
+          example: "Grocery Store"
+        original_description:
+          type: string
+          maxLength: 500
+          description: Original description from import (immutable)
+          example: "GROCERY STORE #1234 01/11"
+        amount:
+          type: integer
+          description: Amount in cents (negative for expenses)
+          example: -5499
+        category_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: ID of the assigned category
+          example: "550e8400-e29b-41d4-a716-446655440002"
+        reviewed:
+          type: boolean
+          description: Whether the transaction has been reviewed
+          example: false
+        reviewed_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Timestamp when marked as reviewed
+          example: "2026-01-11T10:30:00Z"
+        notes:
+          type: string
+          nullable: true
+          description: User notes
+          example: "Weekly groceries"
+        created_at:
+          type: string
+          format: date-time
+          description: Record creation timestamp
+          example: "2026-01-11T08:00:00Z"
+        account_name:
+          type: string
+          description: Name of the associated account (joined)
+          example: "Chase Checking"
+        category_name:
+          type: string
+          nullable: true
+          description: Name of the assigned category (joined)
+          example: "Groceries"
+        category_emoji:
+          type: string
+          nullable: true
+          description: Emoji of the assigned category (joined)
+          example: "🛒"
+
+    TransactionUpdate:
+      type: object
+      description: Fields that can be updated on a transaction
+      properties:
+        description:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Updated description
+        category_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: New category ID (null to uncategorize)
+        reviewed:
+          type: boolean
+          description: Updated review status
+        notes:
+          type: string
+          nullable: true
+          description: Updated notes (null to clear)
+
+    TransactionListResponse:
+      type: object
+      required:
+        - items
+        - total
+        - limit
+        - offset
+        - has_more
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Transaction'
+          description: List of transactions
+        total:
+          type: integer
+          minimum: 0
+          description: Total number of transactions matching filters
+          example: 1234
+        limit:
+          type: integer
+          description: Number of items requested
+          example: 50
+        offset:
+          type: integer
+          description: Number of items skipped
+          example: 0
+        has_more:
+          type: boolean
+          description: Whether more items exist beyond current page
+          example: true
+
+    ErrorResponse:
+      type: object
+      required:
+        - detail
+      properties:
+        detail:
+          type: string
+          description: Error message
+          example: "Transaction not found"
+
+tags:
+  - name: Transactions
+    description: Transaction management endpoints

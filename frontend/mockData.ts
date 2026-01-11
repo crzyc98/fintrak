@@ -1,5 +1,5 @@
 
-import { Account, Category, Transaction, RecurringItem, TopMover } from './types';
+import { LegacyAccount, LegacyCategory, LegacyTransaction, RecurringItem, TopMover } from './types';
 
 export const MOCK_RECURRING: RecurringItem[] = [
   { 
@@ -124,7 +124,7 @@ export const MOCK_RECURRING: RecurringItem[] = [
   },
 ];
 
-export const MOCK_CATEGORIES: Category[] = [
+export const MOCK_CATEGORIES: LegacyCategory[] = [
   { 
     id: 'cat-household', 
     name: 'Household', 
@@ -155,7 +155,7 @@ export const MOCK_CATEGORIES: Category[] = [
   },
 ];
 
-export const MOCK_ACCOUNTS: Account[] = [
+export const MOCK_ACCOUNTS: LegacyAccount[] = [
   { 
     id: '1', 
     name: 'Ultimate Rewards® 9631', 
@@ -209,7 +209,7 @@ export const LIVE_BALANCE_HISTORY = [
   { date: 'Sun', value: 2119906, estimate: true },
 ];
 
-export const MOCK_TRANSACTIONS: Transaction[] = [
+export const MOCK_TRANSACTIONS: LegacyTransaction[] = [
   { 
     id: 't1', 
     merchant: 'Bar Cino - Newport', 
