@@ -1,3 +1,4 @@
+import json
 import uuid
 from typing import Optional
 from datetime import datetime
@@ -10,6 +11,7 @@ from app.models.account import (
     AccountType,
     ASSET_ACCOUNT_TYPES,
 )
+from app.models.csv_import import CsvColumnMapping
 
 
 class AccountService:
@@ -37,11 +39,21 @@ class AccountService:
             created_at=created_at,
         )
 
+    def _parse_csv_mapping(self, mapping_json) -> Optional[CsvColumnMapping]:
+        if mapping_json is None:
+            return None
+        if isinstance(mapping_json, str):
+            mapping_json = json.loads(mapping_json)
+        if isinstance(mapping_json, dict):
+            return CsvColumnMapping(**mapping_json)
+        return None
+
     def get_all(self) -> list[AccountResponse]:
         with get_db() as conn:
             result = conn.execute(
                 """
                 SELECT a.id, a.name, a.type, a.institution, a.is_asset, a.created_at,
+                       a.csv_column_mapping,
                        (SELECT bs.balance
                         FROM balance_snapshots bs
                         WHERE bs.account_id = a.id
@@ -60,7 +72,8 @@ class AccountService:
                 institution=row[3],
                 is_asset=row[4],
                 created_at=row[5],
-                current_balance=row[6],
+                csv_column_mapping=self._parse_csv_mapping(row[6]),
+                current_balance=row[7],
             )
             for row in result
         ]
@@ -70,6 +83,7 @@ class AccountService:
             result = conn.execute(
                 """
                 SELECT a.id, a.name, a.type, a.institution, a.is_asset, a.created_at,
+                       a.csv_column_mapping,
                        (SELECT bs.balance
                         FROM balance_snapshots bs
                         WHERE bs.account_id = a.id
@@ -91,7 +105,8 @@ class AccountService:
             institution=result[3],
             is_asset=result[4],
             created_at=result[5],
-            current_balance=result[6],
+            csv_column_mapping=self._parse_csv_mapping(result[6]),
+            current_balance=result[7],
         )
 
     def update(self, account_id: str, data: AccountUpdate) -> Optional[AccountResponse]:
@@ -116,6 +131,10 @@ class AccountService:
             updates.append("institution = ?")
             values.append(data.institution)
 
+        if data.csv_column_mapping is not None:
+            updates.append("csv_column_mapping = ?")
+            values.append(data.csv_column_mapping.model_dump_json())
+
         if not updates:
             return existing
 
@@ -125,6 +144,21 @@ class AccountService:
             conn.execute(
                 f"UPDATE accounts SET {', '.join(updates)} WHERE id = ?",
                 values,
+            )
+
+        return self.get_by_id(account_id)
+
+    def update_csv_mapping(self, account_id: str, mapping: Optional[CsvColumnMapping]) -> Optional[AccountResponse]:
+        existing = self.get_by_id(account_id)
+        if not existing:
+            return None
+
+        mapping_json = mapping.model_dump_json() if mapping else None
+
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE accounts SET csv_column_mapping = ? WHERE id = ?",
+                [mapping_json, account_id],
             )
 
         return self.get_by_id(account_id)

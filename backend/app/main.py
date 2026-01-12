@@ -4,7 +4,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import init_db
-from app.routers import accounts, categories, transactions, categorization
+from app.routers import accounts, categories, transactions, categorization, csv_import
 
 logging.basicConfig(
     level=logging.INFO,
@@ -49,6 +49,7 @@ app.include_router(accounts.router)
 app.include_router(categories.router)
 app.include_router(transactions.router)
 app.include_router(categorization.router)
+app.include_router(csv_import.router)
 
 
 @app.get("/api/health")

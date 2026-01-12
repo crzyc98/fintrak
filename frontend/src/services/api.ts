@@ -33,6 +33,19 @@ export interface AccountUpdateData {
   institution?: string;
 }
 
+// CSV Import Types
+export type AmountMode = 'single' | 'split';
+
+export interface CsvColumnMapping {
+  date_column: string;
+  description_column: string;
+  amount_mode: AmountMode;
+  amount_column?: string | null;
+  debit_column?: string | null;
+  credit_column?: string | null;
+  date_format: string;
+}
+
 export interface AccountData {
   id: string;
   name: string;
@@ -40,6 +53,7 @@ export interface AccountData {
   institution: string | null;
   is_asset: boolean;
   current_balance: number | null;
+  csv_column_mapping: CsvColumnMapping | null;
   created_at: string;
 }
 
@@ -353,5 +367,147 @@ export async function previewNormalization(
   return fetchApi<NormalizationResponseData>('/api/categorization/normalize', {
     method: 'POST',
     body: JSON.stringify(request),
+  });
+}
+
+// Review Queue API
+export interface DateGroupedTransactions {
+  date_label: string;
+  date: string;
+  transactions: TransactionData[];
+}
+
+export interface ReviewQueueResponse {
+  groups: DateGroupedTransactions[];
+  total_count: number;
+  displayed_count: number;
+  has_more: boolean;
+}
+
+export interface ReviewQueueCountResponse {
+  count: number;
+}
+
+export type BulkOperationType = 'mark_reviewed' | 'set_category' | 'add_note';
+
+export interface BulkOperationRequest {
+  transaction_ids: string[];
+  operation: BulkOperationType;
+  category_id?: string;
+  note?: string;
+}
+
+export interface BulkOperationResponse {
+  success: boolean;
+  affected_count: number;
+  operation: BulkOperationType;
+  transaction_ids: string[];
+}
+
+// Review Queue API Functions
+
+export async function fetchReviewQueue(
+  limit: number = 50,
+  offset: number = 0
+): Promise<ReviewQueueResponse> {
+  const params = new URLSearchParams();
+  params.append('limit', limit.toString());
+  params.append('offset', offset.toString());
+
+  return fetchApi<ReviewQueueResponse>(
+    `/api/transactions/review-queue?${params.toString()}`
+  );
+}
+
+export async function fetchReviewQueueCount(): Promise<ReviewQueueCountResponse> {
+  return fetchApi<ReviewQueueCountResponse>('/api/transactions/review-queue/count');
+}
+
+export async function bulkUpdateTransactions(
+  request: BulkOperationRequest
+): Promise<BulkOperationResponse> {
+  return fetchApi<BulkOperationResponse>('/api/transactions/bulk', {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+// CSV Import API
+export interface CsvPreviewResponse {
+  headers: string[];
+  sample_rows: string[][];
+  row_count: number;
+  suggested_mapping: CsvColumnMapping | null;
+}
+
+export type ParsedTransactionStatus = 'valid' | 'warning' | 'error';
+
+export interface ParsedTransaction {
+  row_number: number;
+  date: string;
+  description: string;
+  amount: number;
+  status: ParsedTransactionStatus;
+  status_reason: string | null;
+}
+
+export interface CsvParseResponse {
+  transactions: ParsedTransaction[];
+  valid_count: number;
+  warning_count: number;
+  error_count: number;
+}
+
+export interface BulkTransactionCreateResponse {
+  created_count: number;
+  account_id: string;
+}
+
+export async function previewCsv(fileContent: string): Promise<CsvPreviewResponse> {
+  return fetchApi<CsvPreviewResponse>('/api/import/preview', {
+    method: 'POST',
+    body: JSON.stringify({ file_content: fileContent }),
+  });
+}
+
+export async function parseCsv(
+  accountId: string,
+  fileContent: string,
+  mapping: CsvColumnMapping
+): Promise<CsvParseResponse> {
+  return fetchApi<CsvParseResponse>('/api/import/parse', {
+    method: 'POST',
+    body: JSON.stringify({
+      account_id: accountId,
+      file_content: fileContent,
+      mapping,
+    }),
+  });
+}
+
+export async function createTransactionsFromCsv(
+  accountId: string,
+  transactions: ParsedTransaction[],
+  mapping: CsvColumnMapping,
+  saveMapping: boolean = true
+): Promise<BulkTransactionCreateResponse> {
+  return fetchApi<BulkTransactionCreateResponse>('/api/import/transactions', {
+    method: 'POST',
+    body: JSON.stringify({
+      account_id: accountId,
+      transactions,
+      mapping,
+      save_mapping: saveMapping,
+    }),
+  });
+}
+
+export async function updateAccountMapping(
+  accountId: string,
+  mapping: CsvColumnMapping
+): Promise<AccountData> {
+  return fetchApi<AccountData>(`/api/accounts/${accountId}`, {
+    method: 'PUT',
+    body: JSON.stringify({ csv_column_mapping: mapping }),
   });
 }

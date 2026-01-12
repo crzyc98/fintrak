@@ -1,8 +1,24 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { AreaChart, Area, ResponsiveContainer } from 'recharts';
 import { Account, AccountType, ACCOUNT_TYPES } from '../types';
-import { fetchAccounts, createAccount, updateAccount, deleteAccount } from '../src/services/api';
+import {
+  fetchAccounts,
+  createAccount,
+  updateAccount,
+  deleteAccount,
+  previewCsv,
+  parseCsv,
+  createTransactionsFromCsv,
+  updateAccountMapping,
+  CsvPreviewResponse,
+  CsvParseResponse,
+  CsvColumnMapping,
+  ParsedTransaction,
+} from '../src/services/api';
 import AccountForm from './forms/AccountForm';
+import CsvDropZone from './CsvDropZone';
+import CsvColumnMapper from './CsvColumnMapper';
+import CsvImportPreview from './CsvImportPreview';
 
 const AccountsView: React.FC = () => {
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -12,6 +28,18 @@ const AccountsView: React.FC = () => {
   const [showForm, setShowForm] = useState(false);
   const [editingAccount, setEditingAccount] = useState<Account | undefined>(undefined);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+
+  // CSV Import state
+  const [csvFileContent, setCsvFileContent] = useState<string | null>(null);
+  const [csvFileName, setCsvFileName] = useState<string | null>(null);
+  const [csvPreview, setCsvPreview] = useState<CsvPreviewResponse | null>(null);
+  const [csvParseResult, setCsvParseResult] = useState<CsvParseResponse | null>(null);
+  const [csvMapping, setCsvMapping] = useState<CsvColumnMapping | null>(null);
+  const [showColumnMapper, setShowColumnMapper] = useState(false);
+  const [showImportPreview, setShowImportPreview] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importSuccess, setImportSuccess] = useState<string | null>(null);
 
   useEffect(() => {
     loadAccounts();
@@ -88,6 +116,117 @@ const AccountsView: React.FC = () => {
   const formatBalance = (cents: number | null): string => {
     if (cents === null) return '--';
     return `$${(cents / 100).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+  };
+
+  // CSV Import handlers
+  const resetImportState = () => {
+    setCsvFileContent(null);
+    setCsvFileName(null);
+    setCsvPreview(null);
+    setCsvParseResult(null);
+    setCsvMapping(null);
+    setShowColumnMapper(false);
+    setShowImportPreview(false);
+    setIsImporting(false);
+    setImportError(null);
+  };
+
+  const handleCsvFileSelect = async (fileContent: string, fileName: string) => {
+    if (!selectedAccount) return;
+
+    setImportError(null);
+    setImportSuccess(null);
+    setCsvFileContent(fileContent);
+    setCsvFileName(fileName);
+
+    try {
+      // Preview the CSV to get headers and sample data
+      const preview = await previewCsv(fileContent);
+      setCsvPreview(preview);
+
+      // Check if account has saved mapping
+      if (selectedAccount.csv_column_mapping) {
+        // Use saved mapping - skip column mapper and go directly to parse
+        const mapping = selectedAccount.csv_column_mapping;
+        setCsvMapping(mapping);
+        const parseResult = await parseCsv(selectedAccount.id, fileContent, mapping);
+        setCsvParseResult(parseResult);
+        setShowImportPreview(true);
+      } else {
+        // No saved mapping - show column mapper
+        setShowColumnMapper(true);
+      }
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Failed to preview CSV');
+      resetImportState();
+    }
+  };
+
+  const handleColumnMappingConfirm = async (mapping: CsvColumnMapping) => {
+    if (!selectedAccount || !csvFileContent) return;
+
+    setImportError(null);
+    setCsvMapping(mapping);
+    setShowColumnMapper(false);
+
+    try {
+      const parseResult = await parseCsv(selectedAccount.id, csvFileContent, mapping);
+      setCsvParseResult(parseResult);
+      setShowImportPreview(true);
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Failed to parse CSV');
+      resetImportState();
+    }
+  };
+
+  const handleImportConfirm = async (selectedTransactions: ParsedTransaction[]) => {
+    if (!selectedAccount || !csvMapping) return;
+
+    setIsImporting(true);
+    setImportError(null);
+
+    try {
+      const result = await createTransactionsFromCsv(
+        selectedAccount.id,
+        selectedTransactions,
+        csvMapping,
+        true // save mapping to account
+      );
+
+      // Reload accounts to get updated mapping
+      await loadAccounts();
+
+      setImportSuccess(`Successfully imported ${result.created_count} transaction${result.created_count !== 1 ? 's' : ''}`);
+      resetImportState();
+
+      // Clear success message after 5 seconds
+      setTimeout(() => setImportSuccess(null), 5000);
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Failed to import transactions');
+      setIsImporting(false);
+    }
+  };
+
+  const handleReconfigureMapping = () => {
+    if (!selectedAccount) return;
+    // Start the reconfigure flow with saved mapping as initial values
+    setShowColumnMapper(true);
+  };
+
+  const handleReconfigureMappingConfirm = async (mapping: CsvColumnMapping) => {
+    if (!selectedAccount) return;
+
+    setImportError(null);
+
+    try {
+      await updateAccountMapping(selectedAccount.id, mapping);
+      await loadAccounts();
+      setShowColumnMapper(false);
+      setImportSuccess('Column mapping updated successfully');
+      setTimeout(() => setImportSuccess(null), 3000);
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Failed to update mapping');
+    }
   };
 
   if (isLoading) {
@@ -305,6 +444,61 @@ const AccountsView: React.FC = () => {
                 </span>
               </div>
             </div>
+
+            {/* CSV Import Section */}
+            <div className="mt-8 pt-8 border-t border-white/5">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-bold text-white">Import Transactions</h3>
+                {selectedAccount.csv_column_mapping && (
+                  <button
+                    onClick={handleReconfigureMapping}
+                    className="text-xs text-gray-500 hover:text-blue-400 transition-colors"
+                  >
+                    Re-configure mapping
+                  </button>
+                )}
+              </div>
+
+              {/* Success message */}
+              {importSuccess && (
+                <div className="mb-4 p-3 bg-green-500/10 border border-green-500/20 rounded-xl text-green-400 text-sm flex items-center">
+                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
+                  </svg>
+                  {importSuccess}
+                </div>
+              )}
+
+              {/* Error message */}
+              {importError && (
+                <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm">
+                  {importError}
+                  <button
+                    onClick={() => setImportError(null)}
+                    className="ml-2 text-red-300 hover:text-white"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              )}
+
+              {/* Saved mapping indicator */}
+              {selectedAccount.csv_column_mapping && (
+                <div className="mb-4 p-3 bg-blue-500/5 border border-blue-500/10 rounded-xl">
+                  <div className="flex items-center text-xs text-blue-400">
+                    <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Column mapping saved - drop CSV to import quickly
+                  </div>
+                </div>
+              )}
+
+              <CsvDropZone
+                onFileSelect={handleCsvFileSelect}
+                disabled={isImporting}
+              />
+            </div>
           </div>
         ) : (
           <div className="flex-1 flex items-center justify-center text-gray-600 text-sm font-medium">
@@ -349,6 +543,34 @@ const AccountsView: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* CSV Column Mapper Modal */}
+      {showColumnMapper && csvPreview && (
+        <CsvColumnMapper
+          preview={csvPreview}
+          initialMapping={csvFileContent ? null : selectedAccount?.csv_column_mapping}
+          onConfirm={csvFileContent ? handleColumnMappingConfirm : handleReconfigureMappingConfirm}
+          onCancel={() => {
+            setShowColumnMapper(false);
+            if (csvFileContent) {
+              resetImportState();
+            }
+          }}
+        />
+      )}
+
+      {/* CSV Import Preview Modal */}
+      {showImportPreview && csvParseResult && (
+        <CsvImportPreview
+          parseResult={csvParseResult}
+          onConfirm={handleImportConfirm}
+          onCancel={() => {
+            setShowImportPreview(false);
+            resetImportState();
+          }}
+          isLoading={isImporting}
+        />
       )}
     </div>
   );
