@@ -10,6 +10,7 @@ import {
   parseCsv,
   createTransactionsFromCsv,
   updateAccountMapping,
+  createBalanceSnapshot,
   CsvPreviewResponse,
   CsvParseResponse,
   CsvColumnMapping,
@@ -20,7 +21,15 @@ import CsvDropZone from './CsvDropZone';
 import CsvColumnMapper from './CsvColumnMapper';
 import CsvImportPreview from './CsvImportPreview';
 
-const AccountsView: React.FC = () => {
+interface AccountsViewProps {
+  triggerNewAccount?: boolean;
+  onNewAccountHandled?: () => void;
+}
+
+const AccountsView: React.FC<AccountsViewProps> = ({
+  triggerNewAccount,
+  onNewAccountHandled,
+}) => {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -28,6 +37,11 @@ const AccountsView: React.FC = () => {
   const [showForm, setShowForm] = useState(false);
   const [editingAccount, setEditingAccount] = useState<Account | undefined>(undefined);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [showBalanceForm, setShowBalanceForm] = useState(false);
+  const [balanceAmount, setBalanceAmount] = useState('');
+  const [balanceDate, setBalanceDate] = useState(new Date().toISOString().split('T')[0]);
+  const [balanceError, setBalanceError] = useState<string | null>(null);
+  const [balanceSuccess, setBalanceSuccess] = useState<string | null>(null);
 
   // CSV Import state
   const [csvFileContent, setCsvFileContent] = useState<string | null>(null);
@@ -44,6 +58,14 @@ const AccountsView: React.FC = () => {
   useEffect(() => {
     loadAccounts();
   }, []);
+
+  useEffect(() => {
+    if (triggerNewAccount) {
+      setEditingAccount(undefined);
+      setShowForm(true);
+      onNewAccountHandled?.();
+    }
+  }, [triggerNewAccount, onNewAccountHandled]);
 
   const loadAccounts = async () => {
     try {
@@ -80,9 +102,10 @@ const AccountsView: React.FC = () => {
     const assets = accounts
       .filter((a) => a.is_asset)
       .reduce((sum, a) => sum + (a.current_balance || 0), 0);
+    // Don't use Math.abs - negative liability balances (overpayments) should reduce total debt
     const debts = accounts
       .filter((a) => !a.is_asset)
-      .reduce((sum, a) => sum + Math.abs(a.current_balance || 0), 0);
+      .reduce((sum, a) => sum + (a.current_balance || 0), 0);
     return { assets, debts, netWorth: assets - debts };
   }, [accounts]);
 
@@ -226,6 +249,33 @@ const AccountsView: React.FC = () => {
       setTimeout(() => setImportSuccess(null), 3000);
     } catch (err) {
       setImportError(err instanceof Error ? err.message : 'Failed to update mapping');
+    }
+  };
+
+  const handleRecordBalance = async () => {
+    if (!selectedAccount) return;
+
+    const amount = parseFloat(balanceAmount);
+    if (isNaN(amount)) {
+      setBalanceError('Please enter a valid amount');
+      return;
+    }
+
+    setBalanceError(null);
+
+    try {
+      await createBalanceSnapshot(selectedAccount.id, {
+        balance: amount,
+        snapshot_date: balanceDate,
+      });
+      await loadAccounts();
+      setShowBalanceForm(false);
+      setBalanceAmount('');
+      setBalanceDate(new Date().toISOString().split('T')[0]);
+      setBalanceSuccess('Balance recorded successfully');
+      setTimeout(() => setBalanceSuccess(null), 3000);
+    } catch (err) {
+      setBalanceError(err instanceof Error ? err.message : 'Failed to record balance');
     }
   };
 
@@ -423,6 +473,15 @@ const AccountsView: React.FC = () => {
                 {selectedAccount.current_balance === null && (
                   <p className="text-xs text-gray-500 mt-1">No balance recorded yet</p>
                 )}
+                <button
+                  onClick={() => setShowBalanceForm(true)}
+                  className="mt-3 text-xs text-blue-400 hover:text-blue-300 transition-colors"
+                >
+                  Record Balance
+                </button>
+                {balanceSuccess && (
+                  <div className="mt-2 text-xs text-green-400">{balanceSuccess}</div>
+                )}
               </div>
             </div>
 
@@ -571,6 +630,72 @@ const AccountsView: React.FC = () => {
           }}
           isLoading={isImporting}
         />
+      )}
+
+      {/* Balance Recording Modal */}
+      {showBalanceForm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-[#0a0f1d] border border-white/10 rounded-2xl p-8 w-full max-w-md">
+            <h2 className="text-xl font-bold text-white mb-2">Record Balance</h2>
+            <p className="text-gray-500 text-sm mb-6">
+              Enter the account balance as of a specific date. The system will compute the current balance by adding transactions after this date.
+            </p>
+
+            {balanceError && (
+              <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm">
+                {balanceError}
+              </div>
+            )}
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">
+                  Balance Amount ($)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={balanceAmount}
+                  onChange={(e) => setBalanceAmount(e.target.value)}
+                  placeholder="0.00"
+                  className="w-full px-4 py-3 bg-[#050910] border border-white/10 rounded-xl text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">
+                  As of Date
+                </label>
+                <input
+                  type="date"
+                  value={balanceDate}
+                  onChange={(e) => setBalanceDate(e.target.value)}
+                  className="w-full px-4 py-3 bg-[#050910] border border-white/10 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                />
+              </div>
+            </div>
+
+            <div className="flex space-x-4 mt-6">
+              <button
+                onClick={() => {
+                  setShowBalanceForm(false);
+                  setBalanceError(null);
+                  setBalanceAmount('');
+                  setBalanceDate(new Date().toISOString().split('T')[0]);
+                }}
+                className="flex-1 px-4 py-3 text-sm font-bold text-gray-400 hover:text-white border border-white/10 rounded-xl transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRecordBalance}
+                className="flex-1 px-4 py-3 text-sm font-bold text-white bg-blue-500 hover:bg-blue-600 rounded-xl transition-colors"
+              >
+                Save Balance
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

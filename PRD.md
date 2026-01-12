@@ -406,34 +406,6 @@ Acceptance criteria:
 
 5) Review queue + bulk actions + dashboard widget
 
-/speckit.specify Build the “Transactions to Review” workflow and dashboard widget for FinTrack.
-
-Scope:
-- Backend + frontend
-- Uses existing transaction model and categorization outputs
-
-Requirements:
-1) Review queue definition
-- Transactions where reviewed=false
-- Default view shows most recent N, grouped by day (Today, Yesterday, older dates)
-
-2) API
-- GET /api/transactions/review-queue?limit=&group_by_day=true
-- Bulk update endpoint:
-  - POST /api/transactions/bulk
-  - Operations: mark_reviewed, set_category, add_note
-  - Accept list of transaction IDs
-
-3) UI
-- Dashboard widget: “Transactions to Review”
-  - grouped list + checkboxes
-  - bulk “Mark reviewed”
-  - quick category assignment (dropdown)
-- Dedicated Review page (optional but preferred) for faster processing
-
-Acceptance criteria:
-- User can process large batches quickly (checkbox + bulk actions)
-- Bulk operations are atomic (all succeed or clear error)
-- UI remains responsive for 200+ transactions
+/speckit.specify k
 
 If you want, next I can generate a matching feature naming scheme for your specs/001-... folders plus a “golden path” order for /plan so you don’t end up rewriting interfaces midstream.

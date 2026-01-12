@@ -104,6 +104,25 @@ const CsvImportPreview: React.FC<CsvImportPreviewProps> = ({
           </div>
         </div>
 
+        {/* Unmatched Categories Warning */}
+        {parseResult.unmatched_categories && parseResult.unmatched_categories.length > 0 && (
+          <div className="px-6 py-3 bg-orange-500/10 border-b border-orange-500/20">
+            <div className="flex items-start space-x-3">
+              <div className="w-5 h-5 rounded-full bg-orange-500/20 flex items-center justify-center flex-shrink-0 mt-0.5">
+                <span className="text-orange-400 text-xs">!</span>
+              </div>
+              <div>
+                <p className="text-sm text-orange-300 font-medium">
+                  {parseResult.unmatched_categories.length} category name{parseResult.unmatched_categories.length !== 1 ? 's' : ''} not found
+                </p>
+                <p className="text-xs text-orange-400/70 mt-1">
+                  These transactions will be imported without a category: {parseResult.unmatched_categories.join(', ')}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Transaction List */}
         <div className="flex-1 overflow-y-auto">
           {/* Valid Transactions */}
@@ -122,6 +141,18 @@ const CsvImportPreview: React.FC<CsvImportPreviewProps> = ({
                     <span className="text-xs text-gray-500 w-12">#{tx.row_number}</span>
                     <span className="text-sm text-gray-400 w-24">{formatDate(tx.date)}</span>
                     <span className="text-sm text-white flex-1 truncate">{tx.description}</span>
+                    {tx.category_name ? (
+                      <span className="text-xs text-gray-500 w-28 truncate flex items-center mr-3">
+                        {tx.category_emoji && <span className="mr-1">{tx.category_emoji}</span>}
+                        {tx.category_name}
+                      </span>
+                    ) : tx.csv_category ? (
+                      <span className="text-xs text-orange-400/70 w-28 truncate mr-3" title={`Unknown: ${tx.csv_category}`}>
+                        ? {tx.csv_category}
+                      </span>
+                    ) : (
+                      <span className="w-28 mr-3" />
+                    )}
                     <span className={`text-sm font-medium tabular-nums ${
                       tx.amount < 0 ? 'text-red-400' : 'text-green-400'
                     }`}>
@@ -169,6 +200,18 @@ const CsvImportPreview: React.FC<CsvImportPreviewProps> = ({
                     <span className="text-xs text-gray-500 w-12">#{tx.row_number}</span>
                     <span className="text-sm text-gray-400 w-24">{formatDate(tx.date)}</span>
                     <span className="text-sm text-white flex-1 truncate">{tx.description}</span>
+                    {tx.category_name ? (
+                      <span className="text-xs text-gray-500 w-28 truncate flex items-center mr-3">
+                        {tx.category_emoji && <span className="mr-1">{tx.category_emoji}</span>}
+                        {tx.category_name}
+                      </span>
+                    ) : tx.csv_category ? (
+                      <span className="text-xs text-orange-400/70 w-28 truncate mr-3" title={`Unknown: ${tx.csv_category}`}>
+                        ? {tx.csv_category}
+                      </span>
+                    ) : (
+                      <span className="w-28 mr-3" />
+                    )}
                     <span className={`text-sm font-medium tabular-nums ${
                       tx.amount < 0 ? 'text-red-400' : 'text-green-400'
                     }`}>

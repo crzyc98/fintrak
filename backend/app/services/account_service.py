@@ -48,66 +48,92 @@ class AccountService:
             return CsvColumnMapping(**mapping_json)
         return None
 
+    def _compute_balance(self, conn, account_id: str) -> Optional[int]:
+        """Compute current balance from latest snapshot + transactions after that date."""
+        # Get latest snapshot
+        snapshot = conn.execute(
+            """
+            SELECT balance, snapshot_date
+            FROM balance_snapshots
+            WHERE account_id = ?
+            ORDER BY snapshot_date DESC, created_at DESC
+            LIMIT 1
+            """,
+            [account_id],
+        ).fetchone()
+
+        if not snapshot:
+            return None
+
+        snapshot_balance, snapshot_date = snapshot[0], snapshot[1]
+
+        # Sum transactions after the snapshot date
+        tx_sum = conn.execute(
+            """
+            SELECT COALESCE(SUM(amount), 0)
+            FROM transactions
+            WHERE account_id = ? AND date > ?
+            """,
+            [account_id, snapshot_date],
+        ).fetchone()[0]
+
+        return snapshot_balance + tx_sum
+
     def get_all(self) -> list[AccountResponse]:
         with get_db() as conn:
             result = conn.execute(
                 """
                 SELECT a.id, a.name, a.type, a.institution, a.is_asset, a.created_at,
-                       a.csv_column_mapping,
-                       (SELECT bs.balance
-                        FROM balance_snapshots bs
-                        WHERE bs.account_id = a.id
-                        ORDER BY bs.snapshot_date DESC, bs.created_at DESC
-                        LIMIT 1) as current_balance
+                       a.csv_column_mapping
                 FROM accounts a
                 ORDER BY a.type, a.name
                 """
             ).fetchall()
 
-        return [
-            AccountResponse(
-                id=row[0],
-                name=row[1],
-                type=AccountType(row[2]),
-                institution=row[3],
-                is_asset=row[4],
-                created_at=row[5],
-                csv_column_mapping=self._parse_csv_mapping(row[6]),
-                current_balance=row[7],
-            )
-            for row in result
-        ]
+            accounts = []
+            for row in result:
+                account_id = row[0]
+                current_balance = self._compute_balance(conn, account_id)
+                accounts.append(AccountResponse(
+                    id=account_id,
+                    name=row[1],
+                    type=AccountType(row[2]),
+                    institution=row[3],
+                    is_asset=row[4],
+                    created_at=row[5],
+                    csv_column_mapping=self._parse_csv_mapping(row[6]),
+                    current_balance=current_balance,
+                ))
+
+        return accounts
 
     def get_by_id(self, account_id: str) -> Optional[AccountResponse]:
         with get_db() as conn:
             result = conn.execute(
                 """
                 SELECT a.id, a.name, a.type, a.institution, a.is_asset, a.created_at,
-                       a.csv_column_mapping,
-                       (SELECT bs.balance
-                        FROM balance_snapshots bs
-                        WHERE bs.account_id = a.id
-                        ORDER BY bs.snapshot_date DESC, bs.created_at DESC
-                        LIMIT 1) as current_balance
+                       a.csv_column_mapping
                 FROM accounts a
                 WHERE a.id = ?
                 """,
                 [account_id],
             ).fetchone()
 
-        if not result:
-            return None
+            if not result:
+                return None
 
-        return AccountResponse(
-            id=result[0],
-            name=result[1],
-            type=AccountType(result[2]),
-            institution=result[3],
-            is_asset=result[4],
-            created_at=result[5],
-            csv_column_mapping=self._parse_csv_mapping(result[6]),
-            current_balance=result[7],
-        )
+            current_balance = self._compute_balance(conn, account_id)
+
+            return AccountResponse(
+                id=result[0],
+                name=result[1],
+                type=AccountType(result[2]),
+                institution=result[3],
+                is_asset=result[4],
+                created_at=result[5],
+                csv_column_mapping=self._parse_csv_mapping(result[6]),
+                current_balance=current_balance,
+            )
 
     def update(self, account_id: str, data: AccountUpdate) -> Optional[AccountResponse]:
         existing = self.get_by_id(account_id)
@@ -202,6 +228,32 @@ class AccountService:
             ).fetchone()
 
         return result[0] if result else None
+
+    def create_balance_snapshot(self, account_id: str, balance: int, snapshot_date: str) -> dict:
+        """Create a balance snapshot for an account."""
+        existing = self.get_by_id(account_id)
+        if not existing:
+            raise ValueError("Account not found")
+
+        snapshot_id = str(uuid.uuid4())
+        created_at = datetime.utcnow()
+
+        with get_db() as conn:
+            conn.execute(
+                """
+                INSERT INTO balance_snapshots (id, account_id, balance, snapshot_date, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                [snapshot_id, account_id, balance, snapshot_date, created_at],
+            )
+
+        return {
+            "id": snapshot_id,
+            "account_id": account_id,
+            "balance": balance,
+            "snapshot_date": snapshot_date,
+            "created_at": created_at.isoformat(),
+        }
 
 
 account_service = AccountService()

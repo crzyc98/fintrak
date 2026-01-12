@@ -44,6 +44,7 @@ export interface CsvColumnMapping {
   debit_column?: string | null;
   credit_column?: string | null;
   date_format: string;
+  category_column?: string | null;
 }
 
 export interface AccountData {
@@ -449,6 +450,10 @@ export interface ParsedTransaction {
   amount: number;
   status: ParsedTransactionStatus;
   status_reason: string | null;
+  csv_category?: string | null;
+  category_id?: string | null;
+  category_name?: string | null;
+  category_emoji?: string | null;
 }
 
 export interface CsvParseResponse {
@@ -456,6 +461,7 @@ export interface CsvParseResponse {
   valid_count: number;
   warning_count: number;
   error_count: number;
+  unmatched_categories: string[];
 }
 
 export interface BulkTransactionCreateResponse {
@@ -509,5 +515,20 @@ export async function updateAccountMapping(
   return fetchApi<AccountData>(`/api/accounts/${accountId}`, {
     method: 'PUT',
     body: JSON.stringify({ csv_column_mapping: mapping }),
+  });
+}
+
+export interface BalanceSnapshotCreate {
+  balance: number;  // In dollars
+  snapshot_date: string;  // YYYY-MM-DD
+}
+
+export async function createBalanceSnapshot(
+  accountId: string,
+  data: BalanceSnapshotCreate
+): Promise<{ id: string; account_id: string; balance: number; snapshot_date: string }> {
+  return fetchApi(`/api/accounts/${accountId}/balance`, {
+    method: 'POST',
+    body: JSON.stringify(data),
   });
 }

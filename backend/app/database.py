@@ -38,6 +38,12 @@ def init_db():
         )
     """)
 
+    # Migration: Add csv_column_mapping column if it doesn't exist (for existing databases)
+    try:
+        conn.execute("SELECT csv_column_mapping FROM accounts LIMIT 1")
+    except duckdb.BinderException:
+        conn.execute("ALTER TABLE accounts ADD COLUMN csv_column_mapping JSON")
+
     conn.execute("""
         CREATE TABLE IF NOT EXISTS categories (
             id VARCHAR(36) PRIMARY KEY,

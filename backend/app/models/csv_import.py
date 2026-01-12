@@ -16,6 +16,7 @@ class CsvColumnMapping(BaseModel):
     debit_column: str | None = None
     credit_column: str | None = None
     date_format: str = "YYYY-MM-DD"
+    category_column: str | None = None
 
     @model_validator(mode='after')
     def validate_amount_columns(self):
@@ -52,6 +53,10 @@ class ParsedTransaction(BaseModel):
     amount: int
     status: Literal["valid", "warning", "error"]
     status_reason: str | None = None
+    csv_category: str | None = None
+    category_id: str | None = None
+    category_name: str | None = None
+    category_emoji: str | None = None
 
 
 class CsvParseResponse(BaseModel):
@@ -59,6 +64,7 @@ class CsvParseResponse(BaseModel):
     valid_count: int
     warning_count: int
     error_count: int
+    unmatched_categories: list[str] = []
 
 
 class BulkTransactionCreateRequest(BaseModel):

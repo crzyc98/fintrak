@@ -24,6 +24,7 @@ const DESCRIPTION_PATTERNS = ['description', 'memo', 'narrative', 'details', 'tr
 const AMOUNT_PATTERNS = ['amount', 'sum', 'value', 'total'];
 const DEBIT_PATTERNS = ['debit', 'withdrawal', 'out', 'expense'];
 const CREDIT_PATTERNS = ['credit', 'deposit', 'in', 'income'];
+const CATEGORY_PATTERNS = ['category', 'type', 'classification', 'group', 'class'];
 
 const CsvColumnMapper: React.FC<CsvColumnMapperProps> = ({
   preview,
@@ -38,6 +39,7 @@ const CsvColumnMapper: React.FC<CsvColumnMapperProps> = ({
   const [debitColumn, setDebitColumn] = useState<string>('');
   const [creditColumn, setCreditColumn] = useState<string>('');
   const [dateFormat, setDateFormat] = useState<string>('YYYY-MM-DD');
+  const [categoryColumn, setCategoryColumn] = useState<string>('');
 
   const matchColumn = (header: string, patterns: string[]): boolean => {
     const headerLower = header.toLowerCase().trim();
@@ -54,6 +56,7 @@ const CsvColumnMapper: React.FC<CsvColumnMapperProps> = ({
       setDebitColumn(initialMapping.debit_column || '');
       setCreditColumn(initialMapping.credit_column || '');
       setDateFormat(initialMapping.date_format);
+      setCategoryColumn(initialMapping.category_column || '');
       return;
     }
 
@@ -66,6 +69,7 @@ const CsvColumnMapper: React.FC<CsvColumnMapperProps> = ({
       setDebitColumn(m.debit_column || '');
       setCreditColumn(m.credit_column || '');
       setDateFormat(m.date_format);
+      setCategoryColumn(m.category_column || '');
       return;
     }
 
@@ -81,6 +85,8 @@ const CsvColumnMapper: React.FC<CsvColumnMapperProps> = ({
         setDebitColumn(header);
       } else if (!creditColumn && matchColumn(header, CREDIT_PATTERNS)) {
         setCreditColumn(header);
+      } else if (!categoryColumn && matchColumn(header, CATEGORY_PATTERNS)) {
+        setCategoryColumn(header);
       }
     }
   }, [preview, initialMapping]);
@@ -115,6 +121,7 @@ const CsvColumnMapper: React.FC<CsvColumnMapperProps> = ({
       debit_column: amountMode === 'split' ? debitColumn : null,
       credit_column: amountMode === 'split' ? creditColumn : null,
       date_format: dateFormat,
+      category_column: categoryColumn || null,
     };
     onConfirm(mapping);
   };
@@ -214,6 +221,26 @@ const CsvColumnMapper: React.FC<CsvColumnMapperProps> = ({
                   <option key={header} value={header}>{header}</option>
                 ))}
               </select>
+            </div>
+
+            {/* Category Column (Optional) */}
+            <div className="col-span-2">
+              <label className="block text-sm font-medium text-gray-400 mb-2">
+                Category Column <span className="text-gray-600">(optional)</span>
+              </label>
+              <select
+                value={categoryColumn}
+                onChange={(e) => setCategoryColumn(e.target.value)}
+                className="w-full bg-gray-900 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:border-blue-500 focus:outline-none"
+              >
+                <option value="">No category mapping</option>
+                {preview.headers.map((header) => (
+                  <option key={header} value={header}>{header}</option>
+                ))}
+              </select>
+              <p className="text-xs text-gray-600 mt-1">
+                Map a category column to auto-assign categories during import
+              </p>
             </div>
           </div>
 

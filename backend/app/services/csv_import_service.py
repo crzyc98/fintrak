@@ -27,6 +27,7 @@ DESCRIPTION_PATTERNS = ['description', 'memo', 'narrative', 'details', 'transact
 AMOUNT_PATTERNS = ['amount', 'sum', 'value', 'total']
 DEBIT_PATTERNS = ['debit', 'withdrawal', 'out', 'expense']
 CREDIT_PATTERNS = ['credit', 'deposit', 'in', 'income']
+CATEGORY_PATTERNS = ['category', 'type', 'classification', 'group', 'class']
 
 # Supported date formats with Python strptime equivalents
 DATE_FORMATS = {
@@ -62,12 +63,21 @@ class CsvImportService:
         header_lower = header.lower().strip()
         return any(pattern in header_lower for pattern in patterns)
 
+    def _get_category_map(self) -> dict[str, tuple[str, str, str | None]]:
+        """Returns a dict mapping lowercase category names to (id, name, emoji)."""
+        with get_db() as conn:
+            result = conn.execute(
+                "SELECT id, name, emoji FROM categories"
+            ).fetchall()
+        return {row[1].lower(): (row[0], row[1], row[2]) for row in result}
+
     def _auto_detect_mapping(self, headers: list[str]) -> Optional[CsvColumnMapping]:
         date_col = None
         desc_col = None
         amount_col = None
         debit_col = None
         credit_col = None
+        category_col = None
 
         for header in headers:
             header_lower = header.lower().strip()
@@ -81,6 +91,8 @@ class CsvImportService:
                 debit_col = header
             elif credit_col is None and self._match_column(header, CREDIT_PATTERNS):
                 credit_col = header
+            elif category_col is None and self._match_column(header, CATEGORY_PATTERNS):
+                category_col = header
 
         # Need at least date and description
         if not date_col or not desc_col:
@@ -94,6 +106,7 @@ class CsvImportService:
                 amount_mode=AmountMode.SINGLE,
                 amount_column=amount_col,
                 date_format='YYYY-MM-DD',
+                category_column=category_col,
             )
         elif debit_col and credit_col:
             return CsvColumnMapping(
@@ -103,6 +116,7 @@ class CsvImportService:
                 debit_column=debit_col,
                 credit_column=credit_col,
                 date_format='YYYY-MM-DD',
+                category_column=category_col,
             )
 
         return None
@@ -214,10 +228,16 @@ class CsvImportService:
         mapping = request.mapping
         existing = self._get_existing_transactions(request.account_id)
 
+        # Build category lookup if category column is mapped
+        category_map: dict[str, tuple[str, str, str | None]] = {}
+        if mapping.category_column:
+            category_map = self._get_category_map()
+
         transactions = []
         valid_count = 0
         warning_count = 0
         error_count = 0
+        unmatched_categories: set[str] = set()
 
         for row_num, row in enumerate(reader, start=2):
             date_str = row.get(mapping.date_column, '').strip()
@@ -237,6 +257,21 @@ class CsvImportService:
 
             # Parse date
             parsed_date = self._parse_date(date_str, mapping.date_format)
+
+            # Extract and match category
+            csv_category = None
+            category_id = None
+            category_name = None
+            category_emoji = None
+
+            if mapping.category_column:
+                csv_category = row.get(mapping.category_column, '').strip()
+                if csv_category:
+                    category_lower = csv_category.lower()
+                    if category_lower in category_map:
+                        category_id, category_name, category_emoji = category_map[category_lower]
+                    else:
+                        unmatched_categories.add(csv_category)
 
             # Determine status
             status = "valid"
@@ -272,6 +307,10 @@ class CsvImportService:
                 amount=amount or 0,
                 status=status,
                 status_reason=status_reason,
+                csv_category=csv_category,
+                category_id=category_id,
+                category_name=category_name,
+                category_emoji=category_emoji,
             ))
 
         return CsvParseResponse(
@@ -279,6 +318,7 @@ class CsvImportService:
             valid_count=valid_count,
             warning_count=warning_count,
             error_count=error_count,
+            unmatched_categories=sorted(unmatched_categories),
         )
 
     def create_transactions(self, request: BulkTransactionCreateRequest) -> BulkTransactionCreateResponse:
@@ -301,8 +341,8 @@ class CsvImportService:
                     """
                     INSERT INTO transactions (
                         id, account_id, date, description, original_description,
-                        amount, reviewed, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        amount, category_id, categorization_source, reviewed, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         tx_id,
@@ -311,6 +351,8 @@ class CsvImportService:
                         tx.description,
                         tx.description,
                         tx.amount,
+                        tx.category_id,
+                        'import' if tx.category_id else None,
                         False,
                         datetime.utcnow(),
                     ],

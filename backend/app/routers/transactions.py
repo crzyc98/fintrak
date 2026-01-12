@@ -8,7 +8,15 @@ from app.models.transaction import (
     TransactionFilters,
     TransactionListResponse,
 )
+from app.models.review import (
+    BulkOperationRequest,
+    BulkOperationType,
+    BulkOperationResponse,
+    ReviewQueueResponse,
+    ReviewQueueCountResponse,
+)
 from app.services.transaction_service import transaction_service
+from app.services.review_service import review_service
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
 
@@ -41,6 +49,58 @@ async def list_transactions(
     )
     return transaction_service.get_list(filters)
 
+
+# Review workflow endpoints - must be before /{transaction_id} routes
+
+@router.get("/review-queue", response_model=ReviewQueueResponse)
+async def get_review_queue(
+    limit: int = Query(50, ge=1, le=200, description="Maximum transactions to return"),
+    offset: int = Query(0, ge=0, description="Number of transactions to skip"),
+):
+    """
+    Get unreviewed transactions grouped by day.
+
+    Returns transactions where reviewed=false, ordered by date descending,
+    with date labels (Today, Yesterday, or formatted date).
+    """
+    return review_service.get_review_queue(limit, offset)
+
+
+@router.get("/review-queue/count", response_model=ReviewQueueCountResponse)
+async def get_review_queue_count():
+    """Get count of unreviewed transactions without fetching full data"""
+    count = transaction_service.count(TransactionFilters(reviewed=False))
+    return ReviewQueueCountResponse(count=count)
+
+
+@router.post("/bulk", response_model=BulkOperationResponse)
+async def bulk_update_transactions(request: BulkOperationRequest):
+    """
+    Perform bulk operations on multiple transactions atomically.
+
+    All operations succeed or all fail (no partial updates).
+
+    Supported operations:
+    - mark_reviewed: Sets reviewed=true and reviewed_at=now
+    - set_category: Updates category_id and sets categorization_source='manual'
+    - add_note: Appends note text to existing notes (with newline separator)
+    """
+    try:
+        if request.operation == BulkOperationType.MARK_REVIEWED:
+            return review_service.bulk_mark_reviewed(request.transaction_ids)
+        elif request.operation == BulkOperationType.SET_CATEGORY:
+            return review_service.bulk_set_category(
+                request.transaction_ids, request.category_id  # type: ignore
+            )
+        elif request.operation == BulkOperationType.ADD_NOTE:
+            return review_service.bulk_add_note(
+                request.transaction_ids, request.note  # type: ignore
+            )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# Single transaction routes - must be after specific path routes
 
 @router.get("/{transaction_id}", response_model=TransactionResponse)
 async def get_transaction(transaction_id: str):
