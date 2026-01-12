@@ -33,6 +33,7 @@ def init_db():
             type VARCHAR(20) NOT NULL,
             institution VARCHAR(200),
             is_asset BOOLEAN NOT NULL,
+            csv_column_mapping JSON,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)

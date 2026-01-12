@@ -1,7 +1,10 @@
 from enum import Enum
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 from datetime import datetime
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from app.models.csv_import import CsvColumnMapping
 
 
 class AccountType(str, Enum):
@@ -33,6 +36,7 @@ class AccountUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     type: Optional[AccountType] = None
     institution: Optional[str] = Field(None, max_length=200)
+    csv_column_mapping: Optional["CsvColumnMapping"] = None
 
 
 class AccountResponse(BaseModel):
@@ -42,7 +46,14 @@ class AccountResponse(BaseModel):
     institution: Optional[str]
     is_asset: bool
     current_balance: Optional[int] = None
+    csv_column_mapping: Optional["CsvColumnMapping"] = None
     created_at: datetime
 
     class Config:
         from_attributes = True
+
+
+# Import for forward reference resolution
+from app.models.csv_import import CsvColumnMapping
+AccountUpdate.model_rebuild()
+AccountResponse.model_rebuild()

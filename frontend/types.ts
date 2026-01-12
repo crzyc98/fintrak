@@ -35,6 +35,19 @@ export interface TopMover {
   sparkline: { val: number }[];
 }
 
+// CSV Import Types
+export type AmountMode = 'single' | 'split';
+
+export interface CsvColumnMapping {
+  date_column: string;
+  description_column: string;
+  amount_mode: AmountMode;
+  amount_column?: string | null;
+  debit_column?: string | null;
+  credit_column?: string | null;
+  date_format: string;
+}
+
 // API Account interface matching backend
 export interface Account {
   id: string;
@@ -43,6 +56,7 @@ export interface Account {
   institution: string | null;
   is_asset: boolean;
   current_balance: number | null;
+  csv_column_mapping: CsvColumnMapping | null;
   created_at: string;
 }
 
