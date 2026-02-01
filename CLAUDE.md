@@ -1,35 +1,63 @@
-# fintrak Development Guidelines
+# FinTrak Development Guidelines
 
-Auto-generated from all feature plans. Last updated: 2026-01-11
+## Tech Stack
 
-## Active Technologies
-- DuckDB (file-based embedded database: `fintrak.duckdb`) (003-ai-categorization)
-- Python 3.11 (backend), TypeScript 5.x (frontend) + FastAPI 0.115.6, Pydantic 2.10.4, React 19.2.3, Vite 6.2.0 (004-review-workflow)
-- DuckDB 1.1.3 (file-based: `fintrak.duckdb`) (004-review-workflow)
-- Python 3.11 (backend), TypeScript 5.8.2 (frontend) + FastAPI 0.115.6, Pydantic 2.10.4, React 19.2.3, Vite 6.2.0 (005-csv-import)
+**Backend:**
+- Python 3.12
+- FastAPI 0.115.6
+- DuckDB 1.1.3 (file-based: `fintrak.duckdb`)
+- Pydantic 2.10.4
 
-- Python 3.11 (backend), TypeScript 5.8.2 (frontend) + FastAPI 0.115.6, DuckDB 1.1.3, Pydantic 2.10.4, React 19.2.3, Vite 6.2.0 (002-transactions-core)
+**Frontend:**
+- React 19.2.3
+- TypeScript 5.8.2
+- Vite 6.2.0
+- Tailwind CSS
 
 ## Project Structure
 
-```text
-src/
-tests/
+```
+fintrak/
+├── backend/
+│   ├── app/
+│   │   ├── models/       # Pydantic models
+│   │   ├── services/     # Business logic
+│   │   └── routers/      # API endpoints
+│   └── tests/
+├── frontend/
+│   ├── components/
+│   └── src/services/
+└── specs/                # Feature specifications
 ```
 
 ## Commands
 
-cd src [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECHNOLOGIES] pytest [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECHNOLOGIES] ruff check .
+```bash
+# Start the app
+./fintrak                 # Both frontend & backend
+./fintrak start -d        # Detached mode
+
+# Backend
+cd backend && pytest      # Run tests
+cd backend && ruff check . # Lint Python
+
+# Frontend
+cd frontend && npm run dev       # Dev server
+cd frontend && npx tsc --noEmit  # Type check
+```
 
 ## Code Style
 
-Python 3.11 (backend), TypeScript 5.8.2 (frontend): Follow standard conventions
+- **Python:** Follow PEP 8, use type hints, Pydantic models for data validation
+- **TypeScript:** Strict mode, functional React components with hooks
+- **Naming:** snake_case (Python), camelCase (TypeScript)
 
-## Recent Changes
-- 005-csv-import: Added Python 3.11 (backend), TypeScript 5.8.2 (frontend) + FastAPI 0.115.6, Pydantic 2.10.4, React 19.2.3, Vite 6.2.0
-- 004-review-workflow: Added Python 3.11 (backend), TypeScript 5.x (frontend) + FastAPI 0.115.6, Pydantic 2.10.4, React 19.2.3, Vite 6.2.0
-- 003-ai-categorization: Added Python 3.11 (backend), TypeScript 5.8.2 (frontend) + FastAPI 0.115.6, DuckDB 1.1.3, Pydantic 2.10.4, React 19.2.3, Vite 6.2.0
+## Database
 
+DuckDB embedded database at project root (`fintrak.duckdb`). Schema managed via `backend/app/database.py`.
 
-<!-- MANUAL ADDITIONS START -->
-<!-- MANUAL ADDITIONS END -->
+## API
+
+- Base URL: `http://localhost:8000`
+- Docs: `http://localhost:8000/docs`
+- All endpoints return JSON, use Pydantic models for request/response validation

@@ -7,6 +7,7 @@ from app.models.transaction import (
     TransactionResponse,
     TransactionFilters,
     TransactionListResponse,
+    MonthlySpendingResponse,
 )
 from app.models.review import (
     BulkOperationRequest,
@@ -17,6 +18,7 @@ from app.models.review import (
 )
 from app.services.transaction_service import transaction_service
 from app.services.review_service import review_service
+from app.services.spending_service import spending_service
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
 
@@ -98,6 +100,17 @@ async def bulk_update_transactions(request: BulkOperationRequest):
             )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/spending/monthly", response_model=MonthlySpendingResponse)
+async def get_monthly_spending():
+    """
+    Get monthly spending data for the dashboard.
+
+    Returns cumulative daily spending for the current month,
+    comparison to last month, and a linear pace line.
+    """
+    return spending_service.get_monthly_spending()
 
 
 # Single transaction routes - must be after specific path routes

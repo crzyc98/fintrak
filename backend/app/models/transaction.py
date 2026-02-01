@@ -75,3 +75,21 @@ class TransactionListResponse(BaseModel):
     limit: int
     offset: int
     has_more: bool
+
+
+class SpendingDataPoint(BaseModel):
+    """A single data point for the spending chart"""
+    day: int  # Day of month (1-31)
+    amount: int  # Cumulative spending in cents (negative = expenses)
+    pace: int  # Expected pace line in cents
+
+
+class MonthlySpendingResponse(BaseModel):
+    """Monthly spending data for the dashboard"""
+    chart_data: list[SpendingDataPoint]
+    current_month_total: int  # Total spending this month in cents
+    last_month_total: int  # Total spending last month in cents
+    last_month_same_point: int  # Spending at same day last month in cents
+    days_in_month: int  # Total days in current month
+    current_day: int  # Current day of month
+    month_label: str  # e.g., "January 2026"

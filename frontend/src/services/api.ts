@@ -1,4 +1,4 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
 async function fetchApi<T>(
   endpoint: string,
@@ -14,7 +14,17 @@ async function fetchApi<T>(
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
+    // Handle FastAPI validation errors (detail is an array)
+    let message: string;
+    if (Array.isArray(error.detail)) {
+      // Extract the first validation error message
+      const firstError = error.detail[0];
+      const field = firstError?.loc?.slice(-1)[0] || 'field';
+      message = `${field}: ${firstError?.msg || 'validation error'}`;
+    } else {
+      message = error.detail || `HTTP ${response.status}`;
+    }
+    throw new Error(message);
   }
 
   return response.json();
@@ -441,7 +451,7 @@ export interface CsvPreviewResponse {
   suggested_mapping: CsvColumnMapping | null;
 }
 
-export type ParsedTransactionStatus = 'valid' | 'warning' | 'error';
+export type ParsedTransactionStatus = 'valid' | 'warning' | 'error' | 'duplicate';
 
 export interface ParsedTransaction {
   row_number: number;
@@ -531,4 +541,125 @@ export async function createBalanceSnapshot(
     method: 'POST',
     body: JSON.stringify(data),
   });
+}
+
+// Category Mapping API
+export interface CategoryMappingSuggestion {
+  source_category: string;
+  target_category_id: string | null;
+  target_category_name: string | null;
+  target_category_emoji: string | null;
+  confidence: number;
+}
+
+export interface CategoryMappingSuggestResponse {
+  suggestions: CategoryMappingSuggestion[];
+}
+
+export interface CategoryMappingSaveItem {
+  source_category: string;
+  target_category_id: string;
+}
+
+export interface CategoryMappingData {
+  id: string;
+  account_id: string | null;
+  source_category: string;
+  target_category_id: string;
+  target_category_name: string | null;
+  target_category_emoji: string | null;
+  source: 'ai' | 'user';
+  created_at: string;
+}
+
+export interface CategoryMappingListResponse {
+  mappings: CategoryMappingData[];
+  total: number;
+}
+
+export async function suggestCategoryMappings(
+  accountId: string,
+  sourceCategories: string[]
+): Promise<CategoryMappingSuggestResponse> {
+  return fetchApi<CategoryMappingSuggestResponse>('/api/import/suggest-mappings', {
+    method: 'POST',
+    body: JSON.stringify({
+      account_id: accountId,
+      source_categories: sourceCategories,
+    }),
+  });
+}
+
+export async function saveCategoryMappings(
+  accountId: string,
+  mappings: CategoryMappingSaveItem[]
+): Promise<{ saved_count: number }> {
+  return fetchApi<{ saved_count: number }>('/api/import/mappings', {
+    method: 'POST',
+    body: JSON.stringify({
+      account_id: accountId,
+      mappings,
+    }),
+  });
+}
+
+export async function listCategoryMappings(
+  accountId?: string
+): Promise<CategoryMappingListResponse> {
+  const params = new URLSearchParams();
+  if (accountId) {
+    params.append('account_id', accountId);
+  }
+  const queryString = params.toString();
+  const url = queryString ? `/api/import/mappings?${queryString}` : '/api/import/mappings';
+  return fetchApi<CategoryMappingListResponse>(url);
+}
+
+// Transaction AI Categorization
+export interface TransactionToCategorize {
+  row_number: number;
+  description: string;
+  amount: number;
+}
+
+export interface TransactionCategorySuggestion {
+  row_number: number;
+  category_id: string;
+  category_name: string;
+  category_emoji: string | null;
+  confidence: number;
+}
+
+export interface TransactionCategorizationResponse {
+  suggestions: TransactionCategorySuggestion[];
+}
+
+export async function categorizeTransactions(
+  transactions: TransactionToCategorize[]
+): Promise<TransactionCategorizationResponse> {
+  return fetchApi<TransactionCategorizationResponse>('/api/import/categorize-transactions', {
+    method: 'POST',
+    body: JSON.stringify({ transactions }),
+  });
+}
+
+// Monthly Spending API
+export interface SpendingDataPoint {
+  day: number;
+  amount: number;  // Cumulative spending in cents
+  pace: number;    // Expected pace in cents
+}
+
+export interface MonthlySpendingData {
+  chart_data: SpendingDataPoint[];
+  current_month_total: number;
+  last_month_total: number;
+  last_month_same_point: number;
+  days_in_month: number;
+  current_day: number;
+  month_label: string;
+}
+
+export async function fetchMonthlySpending(): Promise<MonthlySpendingData> {
+  return fetchApi<MonthlySpendingData>('/api/transactions/spending/monthly');
 }

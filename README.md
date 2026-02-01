@@ -29,7 +29,7 @@ fintrak/
 ## Tech Stack
 
 **Backend:**
-- Python 3.11
+- Python 3.12
 - FastAPI 0.115.6
 - DuckDB 1.1.3 (embedded database)
 - Pydantic 2.10.4
@@ -42,37 +42,59 @@ fintrak/
 
 ## Quick Start
 
-### Backend
+The easiest way to start FinTrack is with the CLI:
 
 ```bash
-cd backend
-
-# Create virtual environment
-python -m venv .venv
-source .venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Run server
-uvicorn app.main:app --reload
+./fintrak              # Start both frontend & backend
 ```
 
-API available at `http://localhost:8000`
+Access the app at:
+- **Frontend:** http://localhost:3000
+- **Backend API:** http://localhost:8000
+- **API Docs:** http://localhost:8000/docs
 
-### Frontend
+### CLI Commands
 
+```bash
+./fintrak              # Start both services (foreground)
+./fintrak start -d     # Start in background (detached)
+./fintrak stop         # Stop all services
+./fintrak status       # Check what's running
+./fintrak backend      # Start only backend
+./fintrak frontend     # Start only frontend
+./fintrak logs         # Tail logs (when running detached)
+```
+
+### Dev Container (Recommended)
+
+Open in VS Code with the Dev Containers extension, or use GitHub Codespaces. The container includes:
+- Python 3.12 + uv
+- Node.js LTS
+- Claude Code CLI
+- OpenAI Codex CLI
+- Speckit
+
+Everything installs automatically on container creation.
+
+### Manual Setup
+
+If you prefer to run services individually:
+
+**Backend:**
+```bash
+uv venv --python 3.12
+source .venv/bin/activate
+uv pip install -r backend/requirements.txt
+cd backend
+uvicorn app.main:app --reload --port 8000
+```
+
+**Frontend:**
 ```bash
 cd frontend
-
-# Install dependencies
 npm install
-
-# Start dev server
 npm run dev
 ```
-
-App available at `http://localhost:5173`
 
 ## Features
 

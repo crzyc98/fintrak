@@ -11,15 +11,20 @@ import {
   createTransactionsFromCsv,
   updateAccountMapping,
   createBalanceSnapshot,
+  suggestCategoryMappings,
+  saveCategoryMappings,
+  categorizeTransactions,
   CsvPreviewResponse,
   CsvParseResponse,
   CsvColumnMapping,
   ParsedTransaction,
+  CategoryMappingSuggestion,
 } from '../src/services/api';
 import AccountForm from './forms/AccountForm';
 import CsvDropZone from './CsvDropZone';
 import CsvColumnMapper from './CsvColumnMapper';
 import CsvImportPreview from './CsvImportPreview';
+import CategoryMappingReview from './CategoryMappingReview';
 
 interface AccountsViewProps {
   triggerNewAccount?: boolean;
@@ -54,6 +59,11 @@ const AccountsView: React.FC<AccountsViewProps> = ({
   const [isImporting, setIsImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [importSuccess, setImportSuccess] = useState<string | null>(null);
+
+  // Category Mapping state
+  const [showCategoryMapping, setShowCategoryMapping] = useState(false);
+  const [categoryMappingSuggestions, setCategoryMappingSuggestions] = useState<CategoryMappingSuggestion[]>([]);
+  const [isFetchingMappings, setIsFetchingMappings] = useState(false);
 
   useEffect(() => {
     loadAccounts();
@@ -150,8 +160,61 @@ const AccountsView: React.FC<AccountsViewProps> = ({
     setCsvMapping(null);
     setShowColumnMapper(false);
     setShowImportPreview(false);
+    setShowCategoryMapping(false);
+    setCategoryMappingSuggestions([]);
+    setIsFetchingMappings(false);
     setIsImporting(false);
     setImportError(null);
+  };
+
+  // Helper to run AI categorization on parsed transactions
+  const runAICategorization = async (parseResult: CsvParseResponse): Promise<CsvParseResponse> => {
+    // Only categorize valid/duplicate transactions that don't already have a category
+    const transactionsToCategorizeTmp = parseResult.transactions.filter(
+      t => (t.status === 'valid' || t.status === 'duplicate') && !t.category_id
+    );
+
+    if (transactionsToCategorizeTmp.length === 0) {
+      return parseResult;
+    }
+
+    try {
+      const response = await categorizeTransactions(
+        transactionsToCategorizeTmp.map(t => ({
+          row_number: t.row_number,
+          description: t.description,
+          amount: t.amount,
+        }))
+      );
+
+      // Build lookup from row_number to category suggestion
+      const suggestionsByRow = new Map(
+        response.suggestions.map(s => [s.row_number, s])
+      );
+
+      // Apply suggestions to transactions
+      const updatedTransactions = parseResult.transactions.map(t => {
+        const suggestion = suggestionsByRow.get(t.row_number);
+        if (suggestion && !t.category_id) {
+          return {
+            ...t,
+            category_id: suggestion.category_id,
+            category_name: suggestion.category_name,
+            category_emoji: suggestion.category_emoji,
+          };
+        }
+        return t;
+      });
+
+      return {
+        ...parseResult,
+        transactions: updatedTransactions,
+      };
+    } catch (err) {
+      console.error('AI categorization failed:', err);
+      // Return original parse result if AI fails
+      return parseResult;
+    }
   };
 
   const handleCsvFileSelect = async (fileContent: string, fileName: string) => {
@@ -172,9 +235,42 @@ const AccountsView: React.FC<AccountsViewProps> = ({
         // Use saved mapping - skip column mapper and go directly to parse
         const mapping = selectedAccount.csv_column_mapping;
         setCsvMapping(mapping);
-        const parseResult = await parseCsv(selectedAccount.id, fileContent, mapping);
-        setCsvParseResult(parseResult);
-        setShowImportPreview(true);
+        let parseResult = await parseCsv(selectedAccount.id, fileContent, mapping);
+
+        // If no category column mapped, run AI categorization
+        if (!mapping.category_column) {
+          setIsFetchingMappings(true);
+          try {
+            parseResult = await runAICategorization(parseResult);
+            setCsvParseResult(parseResult);
+          } finally {
+            setIsFetchingMappings(false);
+          }
+          setShowImportPreview(true);
+        }
+        // Check for unmatched categories (when category column IS mapped)
+        else if (parseResult.unmatched_categories && parseResult.unmatched_categories.length > 0) {
+          setCsvParseResult(parseResult);
+          // Fetch AI suggestions for unmatched categories
+          setIsFetchingMappings(true);
+          try {
+            const suggestionResult = await suggestCategoryMappings(
+              selectedAccount.id,
+              parseResult.unmatched_categories
+            );
+            setCategoryMappingSuggestions(suggestionResult.suggestions);
+            setShowCategoryMapping(true);
+          } catch (suggestErr) {
+            console.error('Failed to get category mapping suggestions:', suggestErr);
+            // Proceed to preview without mappings
+            setShowImportPreview(true);
+          } finally {
+            setIsFetchingMappings(false);
+          }
+        } else {
+          setCsvParseResult(parseResult);
+          setShowImportPreview(true);
+        }
       } else {
         // No saved mapping - show column mapper
         setShowColumnMapper(true);
@@ -193,9 +289,42 @@ const AccountsView: React.FC<AccountsViewProps> = ({
     setShowColumnMapper(false);
 
     try {
-      const parseResult = await parseCsv(selectedAccount.id, csvFileContent, mapping);
-      setCsvParseResult(parseResult);
-      setShowImportPreview(true);
+      let parseResult = await parseCsv(selectedAccount.id, csvFileContent, mapping);
+
+      // If no category column mapped, run AI categorization
+      if (!mapping.category_column) {
+        setIsFetchingMappings(true);
+        try {
+          parseResult = await runAICategorization(parseResult);
+          setCsvParseResult(parseResult);
+        } finally {
+          setIsFetchingMappings(false);
+        }
+        setShowImportPreview(true);
+      }
+      // Check for unmatched categories (when category column IS mapped)
+      else if (parseResult.unmatched_categories && parseResult.unmatched_categories.length > 0) {
+        setCsvParseResult(parseResult);
+        // Fetch AI suggestions for unmatched categories
+        setIsFetchingMappings(true);
+        try {
+          const suggestionResult = await suggestCategoryMappings(
+            selectedAccount.id,
+            parseResult.unmatched_categories
+          );
+          setCategoryMappingSuggestions(suggestionResult.suggestions);
+          setShowCategoryMapping(true);
+        } catch (suggestErr) {
+          console.error('Failed to get category mapping suggestions:', suggestErr);
+          // Proceed to preview without mappings
+          setShowImportPreview(true);
+        } finally {
+          setIsFetchingMappings(false);
+        }
+      } else {
+        setCsvParseResult(parseResult);
+        setShowImportPreview(true);
+      }
     } catch (err) {
       setImportError(err instanceof Error ? err.message : 'Failed to parse CSV');
       resetImportState();
@@ -277,6 +406,83 @@ const AccountsView: React.FC<AccountsViewProps> = ({
     } catch (err) {
       setBalanceError(err instanceof Error ? err.message : 'Failed to record balance');
     }
+  };
+
+  const handleCategoryMappingConfirm = async (
+    mappings: Array<{ source_category: string; target_category_id: string }>,
+    saveMappingsFlag: boolean
+  ) => {
+    if (!selectedAccount || !csvFileContent || !csvMapping) return;
+
+    setIsImporting(true);
+    setImportError(null);
+
+    try {
+      // Save mappings if requested
+      if (saveMappingsFlag && mappings.length > 0) {
+        await saveCategoryMappings(selectedAccount.id, mappings);
+      }
+
+      // Re-parse CSV with the new mappings in place
+      const parseResult = await parseCsv(selectedAccount.id, csvFileContent, csvMapping);
+      setCsvParseResult(parseResult);
+
+      // Apply the user-confirmed mappings to transactions
+      const mappingLookup = new Map<string, CategoryMappingSuggestion>(
+        categoryMappingSuggestions
+          .filter(s => s.target_category_id)
+          .map(s => [s.source_category.toLowerCase(), s] as [string, CategoryMappingSuggestion])
+      );
+
+      // Also add user-selected mappings
+      for (const m of mappings) {
+        const suggestion = categoryMappingSuggestions.find(
+          s => s.source_category === m.source_category
+        );
+        if (suggestion) {
+          mappingLookup.set(m.source_category.toLowerCase(), {
+            ...suggestion,
+            target_category_id: m.target_category_id,
+          });
+        }
+      }
+
+      // Update transactions with mapped categories
+      const updatedTransactions = parseResult.transactions.map(tx => {
+        if (tx.csv_category && !tx.category_id) {
+          const mapped = mappingLookup.get(tx.csv_category.toLowerCase());
+          if (mapped && mapped.target_category_id) {
+            return {
+              ...tx,
+              category_id: mapped.target_category_id,
+              category_name: mapped.target_category_name,
+              category_emoji: mapped.target_category_emoji,
+            };
+          }
+        }
+        return tx;
+      });
+
+      setCsvParseResult({
+        ...parseResult,
+        transactions: updatedTransactions,
+        unmatched_categories: parseResult.unmatched_categories.filter(
+          uc => !mappings.some(m => m.source_category === uc)
+        ),
+      });
+
+      setShowCategoryMapping(false);
+      setShowImportPreview(true);
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Failed to apply category mappings');
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const handleCategoryMappingSkip = () => {
+    setShowCategoryMapping(false);
+    setShowImportPreview(true);
   };
 
   if (isLoading) {
@@ -616,6 +822,17 @@ const AccountsView: React.FC<AccountsViewProps> = ({
               resetImportState();
             }
           }}
+        />
+      )}
+
+      {/* Category Mapping Review Modal */}
+      {showCategoryMapping && categoryMappingSuggestions.length > 0 && (
+        <CategoryMappingReview
+          suggestions={categoryMappingSuggestions}
+          onConfirm={handleCategoryMappingConfirm}
+          onCancel={resetImportState}
+          onSkip={handleCategoryMappingSkip}
+          isLoading={isImporting}
         />
       )}
 

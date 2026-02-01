@@ -19,6 +19,7 @@ from app.models.csv_import import (
     BulkTransactionCreateResponse,
 )
 from app.services.account_service import account_service
+from app.services.category_mapping_service import category_mapping_service
 
 
 # Common column name patterns for auto-detection
@@ -269,9 +270,19 @@ class CsvImportService:
                 if csv_category:
                     category_lower = csv_category.lower()
                     if category_lower in category_map:
+                        # Exact match with existing category
                         category_id, category_name, category_emoji = category_map[category_lower]
                     else:
-                        unmatched_categories.add(csv_category)
+                        # Check for saved mapping
+                        saved_mapping = category_mapping_service.find_mapping(
+                            request.account_id, csv_category
+                        )
+                        if saved_mapping:
+                            category_id = saved_mapping.target_category_id
+                            category_name = saved_mapping.target_category_name
+                            category_emoji = saved_mapping.target_category_emoji
+                        else:
+                            unmatched_categories.add(csv_category)
 
             # Determine status
             status = "valid"
@@ -290,13 +301,13 @@ class CsvImportService:
                 # Check for duplicates
                 tx_key = (parsed_date, description, amount)
                 if tx_key in existing:
-                    status = "warning"
-                    status_reason = "Potential duplicate"
+                    status = "duplicate"
+                    status_reason = "Already exists in this account"
 
             if status == "valid":
                 valid_count += 1
-            elif status == "warning":
-                warning_count += 1
+            elif status == "duplicate":
+                warning_count += 1  # Count duplicates as warnings for summary
             else:
                 error_count += 1
 

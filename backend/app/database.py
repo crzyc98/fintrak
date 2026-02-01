@@ -151,3 +151,23 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_categorization_batches_started
         ON categorization_batches(started_at)
     """)
+
+    # Category mapping table for AI-suggested CSV import mappings
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS category_mappings (
+            id VARCHAR(36) PRIMARY KEY,
+            account_id VARCHAR(36),
+            source_category VARCHAR(255) NOT NULL,
+            target_category_id VARCHAR(36) NOT NULL,
+            source VARCHAR(20) NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (account_id) REFERENCES accounts(id),
+            FOREIGN KEY (target_category_id) REFERENCES categories(id),
+            UNIQUE(account_id, source_category)
+        )
+    """)
+
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_category_mappings_account
+        ON category_mappings(account_id)
+    """)

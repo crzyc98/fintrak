@@ -53,11 +53,17 @@ const CsvImportPreview: React.FC<CsvImportPreviewProps> = ({
     [parseResult.transactions]
   );
 
+  const duplicateTransactions = useMemo(() =>
+    parseResult.transactions.filter(t => t.status === 'duplicate'),
+    [parseResult.transactions]
+  );
+
   const errorTransactions = useMemo(() =>
     parseResult.transactions.filter(t => t.status === 'error'),
     [parseResult.transactions]
   );
 
+  // Duplicates are never included - only valid and optionally warnings
   const selectedTransactions = useMemo(() => {
     const valid = validTransactions;
     const includedWarnings = warningTransactions.filter(t => !excludedWarnings.has(t.row_number));
@@ -83,21 +89,33 @@ const CsvImportPreview: React.FC<CsvImportPreviewProps> = ({
           <div className="flex items-center space-x-2">
             <div className="w-2 h-2 rounded-full bg-green-500" />
             <span className="text-sm text-gray-400">
-              <span className="font-medium text-white">{parseResult.valid_count}</span> valid
+              <span className="font-medium text-white">{validTransactions.length}</span> new
             </span>
           </div>
-          <div className="flex items-center space-x-2">
-            <div className="w-2 h-2 rounded-full bg-yellow-500" />
-            <span className="text-sm text-gray-400">
-              <span className="font-medium text-white">{parseResult.warning_count}</span> warnings
-            </span>
-          </div>
-          <div className="flex items-center space-x-2">
-            <div className="w-2 h-2 rounded-full bg-red-500" />
-            <span className="text-sm text-gray-400">
-              <span className="font-medium text-white">{parseResult.error_count}</span> errors
-            </span>
-          </div>
+          {duplicateTransactions.length > 0 && (
+            <div className="flex items-center space-x-2">
+              <div className="w-2 h-2 rounded-full bg-gray-500" />
+              <span className="text-sm text-gray-400">
+                <span className="font-medium text-white">{duplicateTransactions.length}</span> duplicate{duplicateTransactions.length !== 1 ? 's' : ''} skipped
+              </span>
+            </div>
+          )}
+          {warningTransactions.length > 0 && (
+            <div className="flex items-center space-x-2">
+              <div className="w-2 h-2 rounded-full bg-yellow-500" />
+              <span className="text-sm text-gray-400">
+                <span className="font-medium text-white">{warningTransactions.length}</span> warning{warningTransactions.length !== 1 ? 's' : ''}
+              </span>
+            </div>
+          )}
+          {errorTransactions.length > 0 && (
+            <div className="flex items-center space-x-2">
+              <div className="w-2 h-2 rounded-full bg-red-500" />
+              <span className="text-sm text-gray-400">
+                <span className="font-medium text-white">{errorTransactions.length}</span> error{errorTransactions.length !== 1 ? 's' : ''}
+              </span>
+            </div>
+          )}
           <div className="flex-1" />
           <div className="text-sm text-gray-400">
             <span className="font-medium text-blue-400">{selectedTransactions.length}</span> will be imported
@@ -219,6 +237,41 @@ const CsvImportPreview: React.FC<CsvImportPreviewProps> = ({
                     </span>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* Duplicate Transactions (auto-skipped) */}
+          {duplicateTransactions.length > 0 && (
+            <div className="p-4 border-t border-white/5">
+              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
+                Duplicates - Skipped ({duplicateTransactions.length})
+              </h3>
+              <p className="text-xs text-gray-500 mb-3">
+                These transactions already exist in your account and will not be imported.
+              </p>
+              <div className="space-y-1">
+                {duplicateTransactions.slice(0, 10).map((tx) => (
+                  <div
+                    key={tx.row_number}
+                    className="flex items-center px-3 py-2 rounded-lg bg-gray-800/50 border border-gray-700/50 opacity-60"
+                  >
+                    <div className="w-2 h-2 rounded-full bg-gray-500 mr-3" />
+                    <span className="text-xs text-gray-500 w-12">#{tx.row_number}</span>
+                    <span className="text-sm text-gray-400 w-24">{formatDate(tx.date)}</span>
+                    <span className="text-sm text-gray-400 flex-1 truncate">{tx.description}</span>
+                    <span className={`text-sm font-medium tabular-nums ${
+                      tx.amount < 0 ? 'text-red-400/50' : 'text-green-400/50'
+                    }`}>
+                      {formatAmount(tx.amount)}
+                    </span>
+                  </div>
+                ))}
+                {duplicateTransactions.length > 10 && (
+                  <div className="text-center py-2 text-sm text-gray-500">
+                    ... and {duplicateTransactions.length - 10} more duplicates
+                  </div>
+                )}
               </div>
             </div>
           )}

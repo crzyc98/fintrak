@@ -51,7 +51,7 @@ class ParsedTransaction(BaseModel):
     date: str
     description: str
     amount: int
-    status: Literal["valid", "warning", "error"]
+    status: Literal["valid", "warning", "error", "duplicate"]
     status_reason: str | None = None
     csv_category: str | None = None
     category_id: str | None = None
