@@ -3,7 +3,7 @@ import time
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.database import init_db
+from app.database import init_db, close_connection
 from app.routers import accounts, categories, transactions, categorization, csv_import
 
 logging.basicConfig(
@@ -43,6 +43,13 @@ async def startup_event():
     logger.info("Starting FinTrack API...")
     init_db()
     logger.info("Database initialized")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    logger.info("Shutting down FinTrack API...")
+    close_connection()
+    logger.info("Shutdown complete")
 
 
 app.include_router(accounts.router)

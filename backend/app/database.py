@@ -1,10 +1,12 @@
 import os
 import duckdb
+import logging
 from contextlib import contextmanager
 
 DATABASE_PATH = os.getenv("DATABASE_PATH", "fintrak.duckdb")
 
 _connection = None
+logger = logging.getLogger(__name__)
 
 
 def get_connection() -> duckdb.DuckDBPyConnection:
@@ -21,6 +23,31 @@ def get_db():
         yield conn
     finally:
         pass
+
+
+def checkpoint():
+    """Flush WAL to main database file. Call after bulk operations."""
+    conn = get_connection()
+    conn.execute("CHECKPOINT")
+    logger.info("Database checkpoint completed")
+
+
+def close_connection():
+    """Properly close the database connection with a final checkpoint."""
+    global _connection
+    if _connection is not None:
+        try:
+            _connection.execute("CHECKPOINT")
+            logger.info("Final checkpoint completed")
+        except Exception as e:
+            logger.warning(f"Checkpoint failed during shutdown: {e}")
+        finally:
+            try:
+                _connection.close()
+                logger.info("Database connection closed")
+            except Exception as e:
+                logger.warning(f"Error closing connection: {e}")
+            _connection = None
 
 
 def init_db():

@@ -63,3 +63,4 @@ coverage/
 # Logs
 *.log
 logs/
+.pids/

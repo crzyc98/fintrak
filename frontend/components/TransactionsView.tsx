@@ -11,6 +11,60 @@ import {
   TransactionFiltersData,
 } from '../src/services/api';
 
+// Date Range Preset Types and Definitions
+type DateRange = { date_from: string; date_to: string };
+
+interface DatePreset {
+  id: string;
+  label: string;
+  getRange: () => DateRange;
+}
+
+const formatDateISO = (date: Date): string => {
+  return date.toISOString().split('T')[0];
+};
+
+const DATE_PRESETS: DatePreset[] = [
+  {
+    id: 'this_month',
+    label: 'This Month',
+    getRange: () => {
+      const now = new Date();
+      const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+      return { date_from: formatDateISO(firstDay), date_to: formatDateISO(now) };
+    },
+  },
+  {
+    id: 'last_month',
+    label: 'Last Month',
+    getRange: () => {
+      const now = new Date();
+      const firstDay = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const lastDay = new Date(now.getFullYear(), now.getMonth(), 0);
+      return { date_from: formatDateISO(firstDay), date_to: formatDateISO(lastDay) };
+    },
+  },
+  {
+    id: 'last_30_days',
+    label: 'Last 30 Days',
+    getRange: () => {
+      const now = new Date();
+      const thirtyDaysAgo = new Date(now);
+      thirtyDaysAgo.setDate(now.getDate() - 30);
+      return { date_from: formatDateISO(thirtyDaysAgo), date_to: formatDateISO(now) };
+    },
+  },
+  {
+    id: 'ytd',
+    label: 'YTD',
+    getRange: () => {
+      const now = new Date();
+      const firstDay = new Date(now.getFullYear(), 0, 1);
+      return { date_from: formatDateISO(firstDay), date_to: formatDateISO(now) };
+    },
+  },
+];
+
 const TransactionsView: React.FC = () => {
   // Transaction state
   const [transactions, setTransactions] = useState<TransactionData[]>([]);
@@ -43,6 +97,9 @@ const TransactionsView: React.FC = () => {
   // Selection state
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isCategorizing, setIsCategorizing] = useState(false);
+
+  // Date preset state
+  const [activePreset, setActivePreset] = useState<string | null>(null);
 
   // Load reference data
   useEffect(() => {
@@ -124,6 +181,10 @@ const TransactionsView: React.FC = () => {
 
   // Filter handlers
   const handleFilterChange = (key: keyof TransactionFiltersData, value: string | boolean | undefined) => {
+    // Clear active preset if user manually changes dates
+    if (key === 'date_from' || key === 'date_to') {
+      setActivePreset(null);
+    }
     setFilters((prev) => {
       const newFilters = { ...prev };
       if (value === '' || value === undefined) {
@@ -139,6 +200,15 @@ const TransactionsView: React.FC = () => {
   const clearFilters = () => {
     setFilters({});
     setSearchTerm('');
+    setActivePreset(null);
+    setCurrentPage(1);
+  };
+
+  // Date preset handler
+  const handlePresetClick = (preset: DatePreset) => {
+    const { date_from, date_to } = preset.getRange();
+    setFilters((prev) => ({ ...prev, date_from, date_to }));
+    setActivePreset(preset.id);
     setCurrentPage(1);
   };
 
@@ -386,6 +456,28 @@ const TransactionsView: React.FC = () => {
                   </option>
                 ))}
               </select>
+            </div>
+
+            {/* Date Presets */}
+            <div>
+              <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1.5">
+                Quick Select
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {DATE_PRESETS.map((preset) => (
+                  <button
+                    key={preset.id}
+                    onClick={() => handlePresetClick(preset)}
+                    className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                      activePreset === preset.id
+                        ? 'bg-blue-500 text-white'
+                        : 'bg-[#0a0f1d] border border-white/10 text-gray-400 hover:text-white hover:border-white/20'
+                    }`}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
             </div>
 
             {/* Date From */}

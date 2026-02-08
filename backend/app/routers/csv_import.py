@@ -22,6 +22,7 @@ from app.models.category_mapping import (
 from app.services.csv_import_service import csv_import_service
 from app.services.account_service import account_service
 from app.services.category_mapping_service import category_mapping_service
+from app.database import checkpoint
 
 router = APIRouter(prefix="/api/import", tags=["csv-import"])
 
@@ -55,7 +56,10 @@ async def create_transactions(request: BulkTransactionCreateRequest) -> BulkTran
         raise HTTPException(status_code=404, detail="Account not found")
 
     try:
-        return csv_import_service.create_transactions(request)
+        result = csv_import_service.create_transactions(request)
+        # Checkpoint after bulk import to ensure data is persisted
+        checkpoint()
+        return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
