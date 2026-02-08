@@ -6,6 +6,7 @@ import {
   deleteTransaction,
   fetchAccounts,
   fetchCategories,
+  triggerCategorization,
   TransactionData,
   TransactionFiltersData,
 } from '../src/services/api';
@@ -38,6 +39,10 @@ const TransactionsView: React.FC = () => {
 
   // Delete confirmation
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+
+  // Selection state
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isCategorizing, setIsCategorizing] = useState(false);
 
   // Load reference data
   useEffect(() => {
@@ -221,6 +226,66 @@ const TransactionsView: React.FC = () => {
     setEditValue('');
   };
 
+  // Selection handlers
+  const toggleSelection = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === transactions.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(transactions.map((t) => t.id)));
+    }
+  };
+
+  const clearSelection = () => {
+    setSelectedIds(new Set());
+  };
+
+  // AI Categorization handler
+  const handleAICategorize = async () => {
+    if (selectedIds.size === 0) return;
+
+    try {
+      setIsCategorizing(true);
+      setError(null);
+
+      const result = await triggerCategorization({
+        transaction_ids: Array.from(selectedIds),
+        force_ai: true,
+      });
+
+      // Reload transactions to show updated categories
+      await loadTransactions();
+      clearSelection();
+
+      // Show success message (could be a toast, but using error state for simplicity)
+      const categorized = result.success_count;
+      if (categorized > 0) {
+        // Temporarily show success in a non-blocking way
+        console.log(`Categorized ${categorized} transaction(s)`);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to categorize transactions');
+    } finally {
+      setIsCategorizing(false);
+    }
+  };
+
+  // Clear selection when transactions change (pagination, filters)
+  useEffect(() => {
+    clearSelection();
+  }, [currentPage, filters]);
+
   if (isLoading && transactions.length === 0) {
     return (
       <div className="flex h-full items-center justify-center bg-[#050910]">
@@ -399,6 +464,47 @@ const TransactionsView: React.FC = () => {
         </div>
       )}
 
+      {/* Selection Toolbar */}
+      {selectedIds.size > 0 && (
+        <div className="px-8 py-3 border-b border-white/5 bg-blue-500/10 flex items-center justify-between">
+          <div className="flex items-center space-x-4">
+            <span className="text-sm font-medium text-blue-400">
+              {selectedIds.size} transaction{selectedIds.size !== 1 ? 's' : ''} selected
+            </span>
+            <button
+              onClick={clearSelection}
+              className="text-sm text-gray-400 hover:text-white transition-colors"
+            >
+              Clear selection
+            </button>
+          </div>
+          <div className="flex items-center space-x-3">
+            <button
+              onClick={handleAICategorize}
+              disabled={isCategorizing}
+              className="flex items-center space-x-2 px-4 py-2 text-sm font-semibold text-white bg-purple-600 hover:bg-purple-500 disabled:bg-purple-600/50 disabled:cursor-not-allowed rounded-xl transition-colors"
+            >
+              {isCategorizing ? (
+                <>
+                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                  <span>Categorizing...</span>
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                  </svg>
+                  <span>AI Categorize</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Transaction Table */}
       <div className="flex-1 overflow-auto px-8 py-4">
         {transactions.length === 0 ? (
@@ -430,12 +536,97 @@ const TransactionsView: React.FC = () => {
             <thead>
               <tr className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">
                 <th className="text-left py-3 px-4 w-8">
-                  <span className="sr-only">Review</span>
+                  <button
+                    onClick={toggleSelectAll}
+                    className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
+                      selectedIds.size === transactions.length && transactions.length > 0
+                        ? 'bg-blue-500 border-blue-500 text-white'
+                        : selectedIds.size > 0
+                        ? 'bg-blue-500/50 border-blue-500 text-white'
+                        : 'border-gray-600 hover:border-gray-400'
+                    }`}
+                    title={selectedIds.size === transactions.length ? 'Deselect all' : 'Select all'}
+                  >
+                    {selectedIds.size > 0 && (
+                      <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                        {selectedIds.size === transactions.length ? (
+                          <path
+                            fillRule="evenodd"
+                            d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                            clipRule="evenodd"
+                          />
+                        ) : (
+                          <path fillRule="evenodd" d="M3 10h14v1H3v-1z" clipRule="evenodd" />
+                        )}
+                      </svg>
+                    )}
+                  </button>
                 </th>
                 <th className="text-left py-3 px-4">Date</th>
                 <th className="text-left py-3 px-4">Description</th>
-                <th className="text-left py-3 px-4">Category</th>
-                <th className="text-left py-3 px-4">Account</th>
+                <th className="text-left py-3 px-4">
+                  <div className="flex items-center space-x-1">
+                    <span>Category</span>
+                    <select
+                      value={filters.category_id || ''}
+                      onChange={(e) => handleFilterChange('category_id', e.target.value || undefined)}
+                      className={`ml-1 bg-transparent border-none text-[10px] font-bold uppercase tracking-widest cursor-pointer focus:outline-none focus:ring-0 ${
+                        filters.category_id ? 'text-blue-400' : 'text-gray-500'
+                      }`}
+                      title="Filter by category"
+                    >
+                      <option value="">All</option>
+                      <option value="__uncategorized__">Uncategorized</option>
+                      {categories.map((cat) => (
+                        <option key={cat.id} value={cat.id}>
+                          {cat.emoji} {cat.name}
+                        </option>
+                      ))}
+                    </select>
+                    {filters.category_id && (
+                      <button
+                        onClick={() => handleFilterChange('category_id', undefined)}
+                        className="text-blue-400 hover:text-blue-300"
+                        title="Clear filter"
+                      >
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                </th>
+                <th className="text-left py-3 px-4">
+                  <div className="flex items-center space-x-1">
+                    <span>Account</span>
+                    <select
+                      value={filters.account_id || ''}
+                      onChange={(e) => handleFilterChange('account_id', e.target.value || undefined)}
+                      className={`ml-1 bg-transparent border-none text-[10px] font-bold uppercase tracking-widest cursor-pointer focus:outline-none focus:ring-0 ${
+                        filters.account_id ? 'text-blue-400' : 'text-gray-500'
+                      }`}
+                      title="Filter by account"
+                    >
+                      <option value="">All</option>
+                      {accounts.map((account) => (
+                        <option key={account.id} value={account.id}>
+                          {account.name}
+                        </option>
+                      ))}
+                    </select>
+                    {filters.account_id && (
+                      <button
+                        onClick={() => handleFilterChange('account_id', undefined)}
+                        className="text-blue-400 hover:text-blue-300"
+                        title="Clear filter"
+                      >
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                </th>
                 <th className="text-right py-3 px-4">Amount</th>
                 <th className="text-center py-3 px-4 w-8">
                   <span className="sr-only">Notes</span>
@@ -451,29 +642,49 @@ const TransactionsView: React.FC = () => {
                   key={transaction.id}
                   className={`group hover:bg-white/5 transition-colors ${
                     transaction.reviewed ? 'opacity-60' : ''
-                  }`}
+                  } ${selectedIds.has(transaction.id) ? 'bg-blue-500/10' : ''}`}
                 >
-                  {/* Review Toggle */}
+                  {/* Selection Checkbox + Review Status */}
                   <td className="py-3 px-4">
-                    <button
-                      onClick={() => handleReviewToggle(transaction)}
-                      className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
-                        transaction.reviewed
-                          ? 'bg-green-500 border-green-500 text-white'
-                          : 'border-gray-600 hover:border-gray-400'
-                      }`}
-                      title={transaction.reviewed ? 'Mark as unreviewed' : 'Mark as reviewed'}
-                    >
-                      {transaction.reviewed && (
-                        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                          <path
-                            fillRule="evenodd"
-                            d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                            clipRule="evenodd"
-                          />
+                    <div className="flex items-center space-x-2">
+                      <button
+                        onClick={() => toggleSelection(transaction.id)}
+                        className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
+                          selectedIds.has(transaction.id)
+                            ? 'bg-blue-500 border-blue-500 text-white'
+                            : 'border-gray-600 hover:border-gray-400'
+                        }`}
+                        title="Select for bulk actions"
+                      >
+                        {selectedIds.has(transaction.id) && (
+                          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                            <path
+                              fillRule="evenodd"
+                              d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                              clipRule="evenodd"
+                            />
+                          </svg>
+                        )}
+                      </button>
+                      {/* Review toggle */}
+                      <button
+                        onClick={() => handleReviewToggle(transaction)}
+                        className={`transition-colors ${
+                          transaction.reviewed
+                            ? 'text-green-500 hover:text-green-400'
+                            : 'text-gray-600 hover:text-gray-400'
+                        }`}
+                        title={transaction.reviewed ? 'Mark as unreviewed' : 'Mark as reviewed'}
+                      >
+                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                          {transaction.reviewed ? (
+                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                          ) : (
+                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm0-2a6 6 0 100-12 6 6 0 000 12z" clipRule="evenodd" />
+                          )}
                         </svg>
-                      )}
-                    </button>
+                      </button>
+                    </div>
                   </td>
 
                   {/* Date */}

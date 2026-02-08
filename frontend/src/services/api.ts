@@ -1,4 +1,4 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
 async function fetchApi<T>(
   endpoint: string,
@@ -14,7 +14,17 @@ async function fetchApi<T>(
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
+    // Handle FastAPI validation errors (detail is an array)
+    let message: string;
+    if (Array.isArray(error.detail)) {
+      // Extract the first validation error message
+      const firstError = error.detail[0];
+      const field = firstError?.loc?.slice(-1)[0] || 'field';
+      message = `${field}: ${firstError?.msg || 'validation error'}`;
+    } else {
+      message = error.detail || `HTTP ${response.status}`;
+    }
+    throw new Error(message);
   }
 
   return response.json();
@@ -33,6 +43,20 @@ export interface AccountUpdateData {
   institution?: string;
 }
 
+// CSV Import Types
+export type AmountMode = 'single' | 'split';
+
+export interface CsvColumnMapping {
+  date_column: string;
+  description_column: string;
+  amount_mode: AmountMode;
+  amount_column?: string | null;
+  debit_column?: string | null;
+  credit_column?: string | null;
+  date_format: string;
+  category_column?: string | null;
+}
+
 export interface AccountData {
   id: string;
   name: string;
@@ -40,6 +64,7 @@ export interface AccountData {
   institution: string | null;
   is_asset: boolean;
   current_balance: number | null;
+  csv_column_mapping: CsvColumnMapping | null;
   created_at: string;
 }
 
@@ -354,4 +379,287 @@ export async function previewNormalization(
     method: 'POST',
     body: JSON.stringify(request),
   });
+}
+
+// Review Queue API
+export interface DateGroupedTransactions {
+  date_label: string;
+  date: string;
+  transactions: TransactionData[];
+}
+
+export interface ReviewQueueResponse {
+  groups: DateGroupedTransactions[];
+  total_count: number;
+  displayed_count: number;
+  has_more: boolean;
+}
+
+export interface ReviewQueueCountResponse {
+  count: number;
+}
+
+export type BulkOperationType = 'mark_reviewed' | 'set_category' | 'add_note';
+
+export interface BulkOperationRequest {
+  transaction_ids: string[];
+  operation: BulkOperationType;
+  category_id?: string;
+  note?: string;
+}
+
+export interface BulkOperationResponse {
+  success: boolean;
+  affected_count: number;
+  operation: BulkOperationType;
+  transaction_ids: string[];
+}
+
+// Review Queue API Functions
+
+export async function fetchReviewQueue(
+  limit: number = 50,
+  offset: number = 0
+): Promise<ReviewQueueResponse> {
+  const params = new URLSearchParams();
+  params.append('limit', limit.toString());
+  params.append('offset', offset.toString());
+
+  return fetchApi<ReviewQueueResponse>(
+    `/api/transactions/review-queue?${params.toString()}`
+  );
+}
+
+export async function fetchReviewQueueCount(): Promise<ReviewQueueCountResponse> {
+  return fetchApi<ReviewQueueCountResponse>('/api/transactions/review-queue/count');
+}
+
+export async function bulkUpdateTransactions(
+  request: BulkOperationRequest
+): Promise<BulkOperationResponse> {
+  return fetchApi<BulkOperationResponse>('/api/transactions/bulk', {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+}
+
+// CSV Import API
+export interface CsvPreviewResponse {
+  headers: string[];
+  sample_rows: string[][];
+  row_count: number;
+  suggested_mapping: CsvColumnMapping | null;
+}
+
+export type ParsedTransactionStatus = 'valid' | 'warning' | 'error' | 'duplicate';
+
+export interface ParsedTransaction {
+  row_number: number;
+  date: string;
+  description: string;
+  amount: number;
+  status: ParsedTransactionStatus;
+  status_reason: string | null;
+  csv_category?: string | null;
+  category_id?: string | null;
+  category_name?: string | null;
+  category_emoji?: string | null;
+}
+
+export interface CsvParseResponse {
+  transactions: ParsedTransaction[];
+  valid_count: number;
+  warning_count: number;
+  error_count: number;
+  unmatched_categories: string[];
+}
+
+export interface BulkTransactionCreateResponse {
+  created_count: number;
+  account_id: string;
+}
+
+export async function previewCsv(fileContent: string): Promise<CsvPreviewResponse> {
+  return fetchApi<CsvPreviewResponse>('/api/import/preview', {
+    method: 'POST',
+    body: JSON.stringify({ file_content: fileContent }),
+  });
+}
+
+export async function parseCsv(
+  accountId: string,
+  fileContent: string,
+  mapping: CsvColumnMapping
+): Promise<CsvParseResponse> {
+  return fetchApi<CsvParseResponse>('/api/import/parse', {
+    method: 'POST',
+    body: JSON.stringify({
+      account_id: accountId,
+      file_content: fileContent,
+      mapping,
+    }),
+  });
+}
+
+export async function createTransactionsFromCsv(
+  accountId: string,
+  transactions: ParsedTransaction[],
+  mapping: CsvColumnMapping,
+  saveMapping: boolean = true
+): Promise<BulkTransactionCreateResponse> {
+  return fetchApi<BulkTransactionCreateResponse>('/api/import/transactions', {
+    method: 'POST',
+    body: JSON.stringify({
+      account_id: accountId,
+      transactions,
+      mapping,
+      save_mapping: saveMapping,
+    }),
+  });
+}
+
+export async function updateAccountMapping(
+  accountId: string,
+  mapping: CsvColumnMapping
+): Promise<AccountData> {
+  return fetchApi<AccountData>(`/api/accounts/${accountId}`, {
+    method: 'PUT',
+    body: JSON.stringify({ csv_column_mapping: mapping }),
+  });
+}
+
+export interface BalanceSnapshotCreate {
+  balance: number;  // In dollars
+  snapshot_date: string;  // YYYY-MM-DD
+}
+
+export async function createBalanceSnapshot(
+  accountId: string,
+  data: BalanceSnapshotCreate
+): Promise<{ id: string; account_id: string; balance: number; snapshot_date: string }> {
+  return fetchApi(`/api/accounts/${accountId}/balance`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+// Category Mapping API
+export interface CategoryMappingSuggestion {
+  source_category: string;
+  target_category_id: string | null;
+  target_category_name: string | null;
+  target_category_emoji: string | null;
+  confidence: number;
+}
+
+export interface CategoryMappingSuggestResponse {
+  suggestions: CategoryMappingSuggestion[];
+}
+
+export interface CategoryMappingSaveItem {
+  source_category: string;
+  target_category_id: string;
+}
+
+export interface CategoryMappingData {
+  id: string;
+  account_id: string | null;
+  source_category: string;
+  target_category_id: string;
+  target_category_name: string | null;
+  target_category_emoji: string | null;
+  source: 'ai' | 'user';
+  created_at: string;
+}
+
+export interface CategoryMappingListResponse {
+  mappings: CategoryMappingData[];
+  total: number;
+}
+
+export async function suggestCategoryMappings(
+  accountId: string,
+  sourceCategories: string[]
+): Promise<CategoryMappingSuggestResponse> {
+  return fetchApi<CategoryMappingSuggestResponse>('/api/import/suggest-mappings', {
+    method: 'POST',
+    body: JSON.stringify({
+      account_id: accountId,
+      source_categories: sourceCategories,
+    }),
+  });
+}
+
+export async function saveCategoryMappings(
+  accountId: string,
+  mappings: CategoryMappingSaveItem[]
+): Promise<{ saved_count: number }> {
+  return fetchApi<{ saved_count: number }>('/api/import/mappings', {
+    method: 'POST',
+    body: JSON.stringify({
+      account_id: accountId,
+      mappings,
+    }),
+  });
+}
+
+export async function listCategoryMappings(
+  accountId?: string
+): Promise<CategoryMappingListResponse> {
+  const params = new URLSearchParams();
+  if (accountId) {
+    params.append('account_id', accountId);
+  }
+  const queryString = params.toString();
+  const url = queryString ? `/api/import/mappings?${queryString}` : '/api/import/mappings';
+  return fetchApi<CategoryMappingListResponse>(url);
+}
+
+// Transaction AI Categorization
+export interface TransactionToCategorize {
+  row_number: number;
+  description: string;
+  amount: number;
+}
+
+export interface TransactionCategorySuggestion {
+  row_number: number;
+  category_id: string;
+  category_name: string;
+  category_emoji: string | null;
+  confidence: number;
+}
+
+export interface TransactionCategorizationResponse {
+  suggestions: TransactionCategorySuggestion[];
+}
+
+export async function categorizeTransactions(
+  transactions: TransactionToCategorize[]
+): Promise<TransactionCategorizationResponse> {
+  return fetchApi<TransactionCategorizationResponse>('/api/import/categorize-transactions', {
+    method: 'POST',
+    body: JSON.stringify({ transactions }),
+  });
+}
+
+// Monthly Spending API
+export interface SpendingDataPoint {
+  day: number;
+  amount: number;  // Cumulative spending in cents
+  pace: number;    // Expected pace in cents
+}
+
+export interface MonthlySpendingData {
+  chart_data: SpendingDataPoint[];
+  current_month_total: number;
+  last_month_total: number;
+  last_month_same_point: number;
+  days_in_month: number;
+  current_day: number;
+  month_label: string;
+}
+
+export async function fetchMonthlySpending(): Promise<MonthlySpendingData> {
+  return fetchApi<MonthlySpendingData>('/api/transactions/spending/monthly');
 }

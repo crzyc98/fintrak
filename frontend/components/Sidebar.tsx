@@ -68,6 +68,15 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
       ),
     },
     {
+      name: 'Credit Spending',
+      icon: (active: boolean) => (
+        <svg className={`w-5 h-5 ${active ? 'text-white' : 'text-gray-500'}`} fill="currentColor" viewBox="0 0 20 20">
+          <path d="M4 4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2H4z" />
+          <path fillRule="evenodd" d="M2 9v5a2 2 0 002 2h12a2 2 0 002-2V9H2zm3 3a1 1 0 011-1h1a1 1 0 110 2H6a1 1 0 01-1-1zm5 0a1 1 0 011-1h3a1 1 0 110 2h-3a1 1 0 01-1-1z" clipRule="evenodd" />
+        </svg>
+      ),
+    },
+    {
       name: 'Investments',
       icon: () => (
         <svg className="w-5 h-5 text-gray-500" fill="currentColor" viewBox="0 0 20 20">
@@ -83,6 +92,18 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
           <path
             fillRule="evenodd"
             d="M17.707 9.293a1 1 0 010 1.414l-7 7a1 1 0 01-1.414 0l-7-7A.997.997 0 012 10V5a3 3 0 013-3h5c.256 0 .512.098.707.293l7 7zM5 6a1 1 0 100-2 1 1 0 000 2z"
+            clipRule="evenodd"
+          />
+        </svg>
+      ),
+    },
+    {
+      name: 'Review',
+      icon: (active: boolean) => (
+        <svg className={`w-5 h-5 ${active ? 'text-white' : 'text-gray-500'}`} fill="currentColor" viewBox="0 0 20 20">
+          <path
+            fillRule="evenodd"
+            d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
             clipRule="evenodd"
           />
         </svg>

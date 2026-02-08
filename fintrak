@@ -1,0 +1,260 @@
+#!/bin/bash
+
+# FinTrack CLI - Manage the FinTrack application
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PID_DIR="$SCRIPT_DIR/.pids"
+BACKEND_PORT=8000
+FRONTEND_PORT=3000
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+mkdir -p "$PID_DIR"
+
+usage() {
+    echo "FinTrack CLI"
+    echo ""
+    echo "Usage: ./fintrak <command> [options]"
+    echo ""
+    echo "Commands:"
+    echo "  start       Start both frontend and backend (default)"
+    echo "  stop        Stop all running services"
+    echo "  status      Show status of services"
+    echo "  backend     Start only the backend"
+    echo "  frontend    Start only the frontend"
+    echo "  logs        Show logs (requires services running in background)"
+    echo ""
+    echo "Options:"
+    echo "  -d, --detach    Run in background (detached mode)"
+    echo "  -h, --help      Show this help message"
+    echo ""
+    echo "Examples:"
+    echo "  ./fintrak              # Start both services (foreground)"
+    echo "  ./fintrak start -d     # Start both services (background)"
+    echo "  ./fintrak backend      # Start only backend"
+    echo "  ./fintrak stop         # Stop all services"
+}
+
+check_dependencies() {
+    local missing=0
+
+    if ! command -v python3 &> /dev/null; then
+        echo -e "${RED}Error: python3 is not installed${NC}"
+        missing=1
+    fi
+
+    if ! command -v npm &> /dev/null; then
+        echo -e "${RED}Error: npm is not installed${NC}"
+        missing=1
+    fi
+
+    if [ $missing -eq 1 ]; then
+        exit 1
+    fi
+}
+
+is_running() {
+    local service=$1
+    local pid_file="$PID_DIR/$service.pid"
+
+    if [ -f "$pid_file" ]; then
+        local pid=$(cat "$pid_file")
+        if kill -0 "$pid" 2>/dev/null; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
+start_backend() {
+    local detach=$1
+
+    if is_running backend; then
+        echo -e "${YELLOW}Backend is already running${NC}"
+        return
+    fi
+
+    echo "Starting backend on port $BACKEND_PORT..."
+    cd "$SCRIPT_DIR/backend"
+
+    if [ "$detach" = "true" ]; then
+        nohup uvicorn app.main:app --reload --host 0.0.0.0 --port $BACKEND_PORT > "$PID_DIR/backend.log" 2>&1 &
+        echo $! > "$PID_DIR/backend.pid"
+        echo -e "${GREEN}Backend started (PID: $!)${NC}"
+    else
+        uvicorn app.main:app --reload --host 0.0.0.0 --port $BACKEND_PORT &
+        echo $! > "$PID_DIR/backend.pid"
+    fi
+}
+
+start_frontend() {
+    local detach=$1
+
+    if is_running frontend; then
+        echo -e "${YELLOW}Frontend is already running${NC}"
+        return
+    fi
+
+    echo "Starting frontend on port $FRONTEND_PORT..."
+    cd "$SCRIPT_DIR/frontend"
+
+    if [ "$detach" = "true" ]; then
+        nohup npm run dev > "$PID_DIR/frontend.log" 2>&1 &
+        echo $! > "$PID_DIR/frontend.pid"
+        echo -e "${GREEN}Frontend started (PID: $!)${NC}"
+    else
+        npm run dev &
+        echo $! > "$PID_DIR/frontend.pid"
+    fi
+}
+
+stop_service() {
+    local service=$1
+    local pid_file="$PID_DIR/$service.pid"
+
+    if [ -f "$pid_file" ]; then
+        local pid=$(cat "$pid_file")
+        if kill -0 "$pid" 2>/dev/null; then
+            kill "$pid" 2>/dev/null
+            # Also kill any child processes
+            pkill -P "$pid" 2>/dev/null || true
+            echo -e "${GREEN}Stopped $service (PID: $pid)${NC}"
+        fi
+        rm -f "$pid_file"
+    fi
+}
+
+stop_all() {
+    echo "Stopping FinTrack services..."
+    stop_service backend
+    stop_service frontend
+    # Also try to kill by port in case PIDs are stale
+    fuser -k $BACKEND_PORT/tcp 2>/dev/null || true
+    fuser -k $FRONTEND_PORT/tcp 2>/dev/null || true
+    echo -e "${GREEN}All services stopped${NC}"
+}
+
+show_status() {
+    echo "FinTrack Service Status"
+    echo "======================="
+
+    if is_running backend; then
+        local pid=$(cat "$PID_DIR/backend.pid")
+        echo -e "Backend:  ${GREEN}Running${NC} (PID: $pid) - http://localhost:$BACKEND_PORT"
+    else
+        echo -e "Backend:  ${RED}Stopped${NC}"
+    fi
+
+    if is_running frontend; then
+        local pid=$(cat "$PID_DIR/frontend.pid")
+        echo -e "Frontend: ${GREEN}Running${NC} (PID: $pid) - http://localhost:$FRONTEND_PORT"
+    else
+        echo -e "Frontend: ${RED}Stopped${NC}"
+    fi
+}
+
+show_logs() {
+    echo "Showing logs (Ctrl+C to exit)..."
+    tail -f "$PID_DIR/backend.log" "$PID_DIR/frontend.log" 2>/dev/null || echo "No logs available. Start services with -d flag first."
+}
+
+start_all() {
+    local detach=$1
+
+    check_dependencies
+
+    echo ""
+    echo "  FinTrack"
+    echo "  ========"
+    echo ""
+
+    start_backend "$detach"
+    start_frontend "$detach"
+
+    echo ""
+    echo "  Backend:  http://localhost:$BACKEND_PORT"
+    echo "  Frontend: http://localhost:$FRONTEND_PORT"
+    echo "  API Docs: http://localhost:$BACKEND_PORT/docs"
+    echo ""
+
+    if [ "$detach" = "true" ]; then
+        echo "Services running in background. Use './fintrak stop' to stop."
+    else
+        echo "Press Ctrl+C to stop"
+
+        # Handle Ctrl+C
+        trap "stop_all; exit" INT TERM
+
+        # Wait for processes
+        wait
+    fi
+}
+
+# Parse arguments
+COMMAND=${1:-start}
+DETACH=false
+
+shift 2>/dev/null || true
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -d|--detach)
+            DETACH=true
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
+# Execute command
+case $COMMAND in
+    start)
+        start_all "$DETACH"
+        ;;
+    stop)
+        stop_all
+        ;;
+    status)
+        show_status
+        ;;
+    backend)
+        check_dependencies
+        start_backend "$DETACH"
+        if [ "$DETACH" != "true" ]; then
+            trap "stop_service backend; exit" INT TERM
+            wait
+        fi
+        ;;
+    frontend)
+        check_dependencies
+        start_frontend "$DETACH"
+        if [ "$DETACH" != "true" ]; then
+            trap "stop_service frontend; exit" INT TERM
+            wait
+        fi
+        ;;
+    logs)
+        show_logs
+        ;;
+    -h|--help|help)
+        usage
+        ;;
+    *)
+        echo -e "${RED}Unknown command: $COMMAND${NC}"
+        echo ""
+        usage
+        exit 1
+        ;;
+esac

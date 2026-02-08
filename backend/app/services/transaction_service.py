@@ -84,8 +84,11 @@ class TransactionService:
             params.append(filters.account_id)
 
         if filters.category_id:
-            conditions.append("t.category_id = ?")
-            params.append(filters.category_id)
+            if filters.category_id == "__uncategorized__":
+                conditions.append("t.category_id IS NULL")
+            else:
+                conditions.append("t.category_id = ?")
+                params.append(filters.category_id)
 
         if filters.date_from:
             conditions.append("t.date >= ?")
@@ -169,8 +172,11 @@ class TransactionService:
             params.append(filters.account_id)
 
         if filters.category_id:
-            conditions.append("category_id = ?")
-            params.append(filters.category_id)
+            if filters.category_id == "__uncategorized__":
+                conditions.append("category_id IS NULL")
+            else:
+                conditions.append("category_id = ?")
+                params.append(filters.category_id)
 
         if filters.date_from:
             conditions.append("date >= ?")

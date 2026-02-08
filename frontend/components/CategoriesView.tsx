@@ -9,7 +9,15 @@ import {
 } from '../src/services/api';
 import CategoryForm from './forms/CategoryForm';
 
-const CategoriesView: React.FC = () => {
+interface CategoriesViewProps {
+  triggerNewCategory?: boolean;
+  onNewCategoryHandled?: () => void;
+}
+
+const CategoriesView: React.FC<CategoriesViewProps> = ({
+  triggerNewCategory,
+  onNewCategoryHandled,
+}) => {
   const [categories, setCategories] = useState<Category[]>([]);
   const [categoryTree, setCategoryTree] = useState<CategoryTreeNode[]>([]);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
@@ -23,6 +31,15 @@ const CategoriesView: React.FC = () => {
   useEffect(() => {
     loadCategories();
   }, []);
+
+  // Handle trigger from parent to open new category form
+  useEffect(() => {
+    if (triggerNewCategory) {
+      setEditingCategory(undefined);
+      setShowForm(true);
+      onNewCategoryHandled?.();
+    }
+  }, [triggerNewCategory, onNewCategoryHandled]);
 
   const loadCategories = async () => {
     try {

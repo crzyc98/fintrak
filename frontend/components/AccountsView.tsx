@@ -1,10 +1,40 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { AreaChart, Area, ResponsiveContainer } from 'recharts';
 import { Account, AccountType, ACCOUNT_TYPES } from '../types';
-import { fetchAccounts, createAccount, updateAccount, deleteAccount } from '../src/services/api';
+import {
+  fetchAccounts,
+  createAccount,
+  updateAccount,
+  deleteAccount,
+  previewCsv,
+  parseCsv,
+  createTransactionsFromCsv,
+  updateAccountMapping,
+  createBalanceSnapshot,
+  suggestCategoryMappings,
+  saveCategoryMappings,
+  categorizeTransactions,
+  CsvPreviewResponse,
+  CsvParseResponse,
+  CsvColumnMapping,
+  ParsedTransaction,
+  CategoryMappingSuggestion,
+} from '../src/services/api';
 import AccountForm from './forms/AccountForm';
+import CsvDropZone from './CsvDropZone';
+import CsvColumnMapper from './CsvColumnMapper';
+import CsvImportPreview from './CsvImportPreview';
+import CategoryMappingReview from './CategoryMappingReview';
 
-const AccountsView: React.FC = () => {
+interface AccountsViewProps {
+  triggerNewAccount?: boolean;
+  onNewAccountHandled?: () => void;
+}
+
+const AccountsView: React.FC<AccountsViewProps> = ({
+  triggerNewAccount,
+  onNewAccountHandled,
+}) => {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -12,10 +42,40 @@ const AccountsView: React.FC = () => {
   const [showForm, setShowForm] = useState(false);
   const [editingAccount, setEditingAccount] = useState<Account | undefined>(undefined);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [showBalanceForm, setShowBalanceForm] = useState(false);
+  const [balanceAmount, setBalanceAmount] = useState('');
+  const [balanceDate, setBalanceDate] = useState(new Date().toISOString().split('T')[0]);
+  const [balanceError, setBalanceError] = useState<string | null>(null);
+  const [balanceSuccess, setBalanceSuccess] = useState<string | null>(null);
+
+  // CSV Import state
+  const [csvFileContent, setCsvFileContent] = useState<string | null>(null);
+  const [csvFileName, setCsvFileName] = useState<string | null>(null);
+  const [csvPreview, setCsvPreview] = useState<CsvPreviewResponse | null>(null);
+  const [csvParseResult, setCsvParseResult] = useState<CsvParseResponse | null>(null);
+  const [csvMapping, setCsvMapping] = useState<CsvColumnMapping | null>(null);
+  const [showColumnMapper, setShowColumnMapper] = useState(false);
+  const [showImportPreview, setShowImportPreview] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importSuccess, setImportSuccess] = useState<string | null>(null);
+
+  // Category Mapping state
+  const [showCategoryMapping, setShowCategoryMapping] = useState(false);
+  const [categoryMappingSuggestions, setCategoryMappingSuggestions] = useState<CategoryMappingSuggestion[]>([]);
+  const [isFetchingMappings, setIsFetchingMappings] = useState(false);
 
   useEffect(() => {
     loadAccounts();
   }, []);
+
+  useEffect(() => {
+    if (triggerNewAccount) {
+      setEditingAccount(undefined);
+      setShowForm(true);
+      onNewAccountHandled?.();
+    }
+  }, [triggerNewAccount, onNewAccountHandled]);
 
   const loadAccounts = async () => {
     try {
@@ -52,9 +112,10 @@ const AccountsView: React.FC = () => {
     const assets = accounts
       .filter((a) => a.is_asset)
       .reduce((sum, a) => sum + (a.current_balance || 0), 0);
+    // Don't use Math.abs - negative liability balances (overpayments) should reduce total debt
     const debts = accounts
       .filter((a) => !a.is_asset)
-      .reduce((sum, a) => sum + Math.abs(a.current_balance || 0), 0);
+      .reduce((sum, a) => sum + (a.current_balance || 0), 0);
     return { assets, debts, netWorth: assets - debts };
   }, [accounts]);
 
@@ -88,6 +149,340 @@ const AccountsView: React.FC = () => {
   const formatBalance = (cents: number | null): string => {
     if (cents === null) return '--';
     return `$${(cents / 100).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+  };
+
+  // CSV Import handlers
+  const resetImportState = () => {
+    setCsvFileContent(null);
+    setCsvFileName(null);
+    setCsvPreview(null);
+    setCsvParseResult(null);
+    setCsvMapping(null);
+    setShowColumnMapper(false);
+    setShowImportPreview(false);
+    setShowCategoryMapping(false);
+    setCategoryMappingSuggestions([]);
+    setIsFetchingMappings(false);
+    setIsImporting(false);
+    setImportError(null);
+  };
+
+  // Helper to run AI categorization on parsed transactions
+  const runAICategorization = async (parseResult: CsvParseResponse): Promise<CsvParseResponse> => {
+    // Only categorize valid/duplicate transactions that don't already have a category
+    const transactionsToCategorizeTmp = parseResult.transactions.filter(
+      t => (t.status === 'valid' || t.status === 'duplicate') && !t.category_id
+    );
+
+    if (transactionsToCategorizeTmp.length === 0) {
+      return parseResult;
+    }
+
+    try {
+      const response = await categorizeTransactions(
+        transactionsToCategorizeTmp.map(t => ({
+          row_number: t.row_number,
+          description: t.description,
+          amount: t.amount,
+        }))
+      );
+
+      // Build lookup from row_number to category suggestion
+      const suggestionsByRow = new Map(
+        response.suggestions.map(s => [s.row_number, s])
+      );
+
+      // Apply suggestions to transactions
+      const updatedTransactions = parseResult.transactions.map(t => {
+        const suggestion = suggestionsByRow.get(t.row_number);
+        if (suggestion && !t.category_id) {
+          return {
+            ...t,
+            category_id: suggestion.category_id,
+            category_name: suggestion.category_name,
+            category_emoji: suggestion.category_emoji,
+          };
+        }
+        return t;
+      });
+
+      return {
+        ...parseResult,
+        transactions: updatedTransactions,
+      };
+    } catch (err) {
+      console.error('AI categorization failed:', err);
+      // Return original parse result if AI fails
+      return parseResult;
+    }
+  };
+
+  const handleCsvFileSelect = async (fileContent: string, fileName: string) => {
+    if (!selectedAccount) return;
+
+    setImportError(null);
+    setImportSuccess(null);
+    setCsvFileContent(fileContent);
+    setCsvFileName(fileName);
+
+    try {
+      // Preview the CSV to get headers and sample data
+      const preview = await previewCsv(fileContent);
+      setCsvPreview(preview);
+
+      // Check if account has saved mapping
+      if (selectedAccount.csv_column_mapping) {
+        // Use saved mapping - skip column mapper and go directly to parse
+        const mapping = selectedAccount.csv_column_mapping;
+        setCsvMapping(mapping);
+        let parseResult = await parseCsv(selectedAccount.id, fileContent, mapping);
+
+        // If no category column mapped, run AI categorization
+        if (!mapping.category_column) {
+          setIsFetchingMappings(true);
+          try {
+            parseResult = await runAICategorization(parseResult);
+            setCsvParseResult(parseResult);
+          } finally {
+            setIsFetchingMappings(false);
+          }
+          setShowImportPreview(true);
+        }
+        // Check for unmatched categories (when category column IS mapped)
+        else if (parseResult.unmatched_categories && parseResult.unmatched_categories.length > 0) {
+          setCsvParseResult(parseResult);
+          // Fetch AI suggestions for unmatched categories
+          setIsFetchingMappings(true);
+          try {
+            const suggestionResult = await suggestCategoryMappings(
+              selectedAccount.id,
+              parseResult.unmatched_categories
+            );
+            setCategoryMappingSuggestions(suggestionResult.suggestions);
+            setShowCategoryMapping(true);
+          } catch (suggestErr) {
+            console.error('Failed to get category mapping suggestions:', suggestErr);
+            // Proceed to preview without mappings
+            setShowImportPreview(true);
+          } finally {
+            setIsFetchingMappings(false);
+          }
+        } else {
+          setCsvParseResult(parseResult);
+          setShowImportPreview(true);
+        }
+      } else {
+        // No saved mapping - show column mapper
+        setShowColumnMapper(true);
+      }
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Failed to preview CSV');
+      resetImportState();
+    }
+  };
+
+  const handleColumnMappingConfirm = async (mapping: CsvColumnMapping) => {
+    if (!selectedAccount || !csvFileContent) return;
+
+    setImportError(null);
+    setCsvMapping(mapping);
+    setShowColumnMapper(false);
+
+    try {
+      let parseResult = await parseCsv(selectedAccount.id, csvFileContent, mapping);
+
+      // If no category column mapped, run AI categorization
+      if (!mapping.category_column) {
+        setIsFetchingMappings(true);
+        try {
+          parseResult = await runAICategorization(parseResult);
+          setCsvParseResult(parseResult);
+        } finally {
+          setIsFetchingMappings(false);
+        }
+        setShowImportPreview(true);
+      }
+      // Check for unmatched categories (when category column IS mapped)
+      else if (parseResult.unmatched_categories && parseResult.unmatched_categories.length > 0) {
+        setCsvParseResult(parseResult);
+        // Fetch AI suggestions for unmatched categories
+        setIsFetchingMappings(true);
+        try {
+          const suggestionResult = await suggestCategoryMappings(
+            selectedAccount.id,
+            parseResult.unmatched_categories
+          );
+          setCategoryMappingSuggestions(suggestionResult.suggestions);
+          setShowCategoryMapping(true);
+        } catch (suggestErr) {
+          console.error('Failed to get category mapping suggestions:', suggestErr);
+          // Proceed to preview without mappings
+          setShowImportPreview(true);
+        } finally {
+          setIsFetchingMappings(false);
+        }
+      } else {
+        setCsvParseResult(parseResult);
+        setShowImportPreview(true);
+      }
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Failed to parse CSV');
+      resetImportState();
+    }
+  };
+
+  const handleImportConfirm = async (selectedTransactions: ParsedTransaction[]) => {
+    if (!selectedAccount || !csvMapping) return;
+
+    setIsImporting(true);
+    setImportError(null);
+
+    try {
+      const result = await createTransactionsFromCsv(
+        selectedAccount.id,
+        selectedTransactions,
+        csvMapping,
+        true // save mapping to account
+      );
+
+      // Reload accounts to get updated mapping
+      await loadAccounts();
+
+      setImportSuccess(`Successfully imported ${result.created_count} transaction${result.created_count !== 1 ? 's' : ''}`);
+      resetImportState();
+
+      // Clear success message after 5 seconds
+      setTimeout(() => setImportSuccess(null), 5000);
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Failed to import transactions');
+      setIsImporting(false);
+    }
+  };
+
+  const handleReconfigureMapping = () => {
+    if (!selectedAccount) return;
+    // Start the reconfigure flow with saved mapping as initial values
+    setShowColumnMapper(true);
+  };
+
+  const handleReconfigureMappingConfirm = async (mapping: CsvColumnMapping) => {
+    if (!selectedAccount) return;
+
+    setImportError(null);
+
+    try {
+      await updateAccountMapping(selectedAccount.id, mapping);
+      await loadAccounts();
+      setShowColumnMapper(false);
+      setImportSuccess('Column mapping updated successfully');
+      setTimeout(() => setImportSuccess(null), 3000);
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Failed to update mapping');
+    }
+  };
+
+  const handleRecordBalance = async () => {
+    if (!selectedAccount) return;
+
+    const amount = parseFloat(balanceAmount);
+    if (isNaN(amount)) {
+      setBalanceError('Please enter a valid amount');
+      return;
+    }
+
+    setBalanceError(null);
+
+    try {
+      await createBalanceSnapshot(selectedAccount.id, {
+        balance: amount,
+        snapshot_date: balanceDate,
+      });
+      await loadAccounts();
+      setShowBalanceForm(false);
+      setBalanceAmount('');
+      setBalanceDate(new Date().toISOString().split('T')[0]);
+      setBalanceSuccess('Balance recorded successfully');
+      setTimeout(() => setBalanceSuccess(null), 3000);
+    } catch (err) {
+      setBalanceError(err instanceof Error ? err.message : 'Failed to record balance');
+    }
+  };
+
+  const handleCategoryMappingConfirm = async (
+    mappings: Array<{ source_category: string; target_category_id: string }>,
+    saveMappingsFlag: boolean
+  ) => {
+    if (!selectedAccount || !csvFileContent || !csvMapping) return;
+
+    setIsImporting(true);
+    setImportError(null);
+
+    try {
+      // Save mappings if requested
+      if (saveMappingsFlag && mappings.length > 0) {
+        await saveCategoryMappings(selectedAccount.id, mappings);
+      }
+
+      // Re-parse CSV with the new mappings in place
+      const parseResult = await parseCsv(selectedAccount.id, csvFileContent, csvMapping);
+      setCsvParseResult(parseResult);
+
+      // Apply the user-confirmed mappings to transactions
+      const mappingLookup = new Map<string, CategoryMappingSuggestion>(
+        categoryMappingSuggestions
+          .filter(s => s.target_category_id)
+          .map(s => [s.source_category.toLowerCase(), s] as [string, CategoryMappingSuggestion])
+      );
+
+      // Also add user-selected mappings
+      for (const m of mappings) {
+        const suggestion = categoryMappingSuggestions.find(
+          s => s.source_category === m.source_category
+        );
+        if (suggestion) {
+          mappingLookup.set(m.source_category.toLowerCase(), {
+            ...suggestion,
+            target_category_id: m.target_category_id,
+          });
+        }
+      }
+
+      // Update transactions with mapped categories
+      const updatedTransactions = parseResult.transactions.map(tx => {
+        if (tx.csv_category && !tx.category_id) {
+          const mapped = mappingLookup.get(tx.csv_category.toLowerCase());
+          if (mapped && mapped.target_category_id) {
+            return {
+              ...tx,
+              category_id: mapped.target_category_id,
+              category_name: mapped.target_category_name,
+              category_emoji: mapped.target_category_emoji,
+            };
+          }
+        }
+        return tx;
+      });
+
+      setCsvParseResult({
+        ...parseResult,
+        transactions: updatedTransactions,
+        unmatched_categories: parseResult.unmatched_categories.filter(
+          uc => !mappings.some(m => m.source_category === uc)
+        ),
+      });
+
+      setShowCategoryMapping(false);
+      setShowImportPreview(true);
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Failed to apply category mappings');
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const handleCategoryMappingSkip = () => {
+    setShowCategoryMapping(false);
+    setShowImportPreview(true);
   };
 
   if (isLoading) {
@@ -284,6 +679,15 @@ const AccountsView: React.FC = () => {
                 {selectedAccount.current_balance === null && (
                   <p className="text-xs text-gray-500 mt-1">No balance recorded yet</p>
                 )}
+                <button
+                  onClick={() => setShowBalanceForm(true)}
+                  className="mt-3 text-xs text-blue-400 hover:text-blue-300 transition-colors"
+                >
+                  Record Balance
+                </button>
+                {balanceSuccess && (
+                  <div className="mt-2 text-xs text-green-400">{balanceSuccess}</div>
+                )}
               </div>
             </div>
 
@@ -304,6 +708,61 @@ const AccountsView: React.FC = () => {
                   {new Date(selectedAccount.created_at).toLocaleDateString()}
                 </span>
               </div>
+            </div>
+
+            {/* CSV Import Section */}
+            <div className="mt-8 pt-8 border-t border-white/5">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-bold text-white">Import Transactions</h3>
+                {selectedAccount.csv_column_mapping && (
+                  <button
+                    onClick={handleReconfigureMapping}
+                    className="text-xs text-gray-500 hover:text-blue-400 transition-colors"
+                  >
+                    Re-configure mapping
+                  </button>
+                )}
+              </div>
+
+              {/* Success message */}
+              {importSuccess && (
+                <div className="mb-4 p-3 bg-green-500/10 border border-green-500/20 rounded-xl text-green-400 text-sm flex items-center">
+                  <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
+                  </svg>
+                  {importSuccess}
+                </div>
+              )}
+
+              {/* Error message */}
+              {importError && (
+                <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm">
+                  {importError}
+                  <button
+                    onClick={() => setImportError(null)}
+                    className="ml-2 text-red-300 hover:text-white"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              )}
+
+              {/* Saved mapping indicator */}
+              {selectedAccount.csv_column_mapping && (
+                <div className="mb-4 p-3 bg-blue-500/5 border border-blue-500/10 rounded-xl">
+                  <div className="flex items-center text-xs text-blue-400">
+                    <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Column mapping saved - drop CSV to import quickly
+                  </div>
+                </div>
+              )}
+
+              <CsvDropZone
+                onFileSelect={handleCsvFileSelect}
+                disabled={isImporting}
+              />
             </div>
           </div>
         ) : (
@@ -345,6 +804,111 @@ const AccountsView: React.FC = () => {
                 className="flex-1 px-4 py-3 text-sm font-bold text-white bg-red-500 hover:bg-red-600 rounded-xl transition-colors"
               >
                 Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CSV Column Mapper Modal */}
+      {showColumnMapper && csvPreview && (
+        <CsvColumnMapper
+          preview={csvPreview}
+          initialMapping={csvFileContent ? null : selectedAccount?.csv_column_mapping}
+          onConfirm={csvFileContent ? handleColumnMappingConfirm : handleReconfigureMappingConfirm}
+          onCancel={() => {
+            setShowColumnMapper(false);
+            if (csvFileContent) {
+              resetImportState();
+            }
+          }}
+        />
+      )}
+
+      {/* Category Mapping Review Modal */}
+      {showCategoryMapping && categoryMappingSuggestions.length > 0 && (
+        <CategoryMappingReview
+          suggestions={categoryMappingSuggestions}
+          onConfirm={handleCategoryMappingConfirm}
+          onCancel={resetImportState}
+          onSkip={handleCategoryMappingSkip}
+          isLoading={isImporting}
+        />
+      )}
+
+      {/* CSV Import Preview Modal */}
+      {showImportPreview && csvParseResult && (
+        <CsvImportPreview
+          parseResult={csvParseResult}
+          onConfirm={handleImportConfirm}
+          onCancel={() => {
+            setShowImportPreview(false);
+            resetImportState();
+          }}
+          isLoading={isImporting}
+        />
+      )}
+
+      {/* Balance Recording Modal */}
+      {showBalanceForm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-[#0a0f1d] border border-white/10 rounded-2xl p-8 w-full max-w-md">
+            <h2 className="text-xl font-bold text-white mb-2">Record Balance</h2>
+            <p className="text-gray-500 text-sm mb-6">
+              Enter the account balance as of a specific date. The system will compute the current balance by adding transactions after this date.
+            </p>
+
+            {balanceError && (
+              <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm">
+                {balanceError}
+              </div>
+            )}
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">
+                  Balance Amount ($)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={balanceAmount}
+                  onChange={(e) => setBalanceAmount(e.target.value)}
+                  placeholder="0.00"
+                  className="w-full px-4 py-3 bg-[#050910] border border-white/10 rounded-xl text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-2">
+                  As of Date
+                </label>
+                <input
+                  type="date"
+                  value={balanceDate}
+                  onChange={(e) => setBalanceDate(e.target.value)}
+                  className="w-full px-4 py-3 bg-[#050910] border border-white/10 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                />
+              </div>
+            </div>
+
+            <div className="flex space-x-4 mt-6">
+              <button
+                onClick={() => {
+                  setShowBalanceForm(false);
+                  setBalanceError(null);
+                  setBalanceAmount('');
+                  setBalanceDate(new Date().toISOString().split('T')[0]);
+                }}
+                className="flex-1 px-4 py-3 text-sm font-bold text-gray-400 hover:text-white border border-white/10 rounded-xl transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRecordBalance}
+                className="flex-1 px-4 py-3 text-sm font-bold text-white bg-blue-500 hover:bg-blue-600 rounded-xl transition-colors"
+              >
+                Save Balance
               </button>
             </div>
           </div>

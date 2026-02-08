@@ -1,0 +1,340 @@
+openapi: 3.0.3
+info:
+  title: CSV Import API
+  description: API endpoints for CSV transaction import feature
+  version: 1.0.0
+
+paths:
+  /api/import/preview:
+    post:
+      summary: Preview CSV file
+      description: Returns headers and sample rows for column mapping UI
+      operationId: previewCsv
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CsvPreviewRequest'
+      responses:
+        '200':
+          description: CSV preview data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CsvPreviewResponse'
+        '400':
+          description: Invalid CSV file
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/import/parse:
+    post:
+      summary: Parse CSV with mapping
+      description: Parses CSV using provided column mapping, returns transactions with duplicate detection
+      operationId: parseCsv
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CsvParseRequest'
+      responses:
+        '200':
+          description: Parsed transactions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CsvParseResponse'
+        '400':
+          description: Parse error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Account not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/import/transactions:
+    post:
+      summary: Create transactions from import
+      description: Bulk creates transactions from confirmed CSV import
+      operationId: createTransactionsFromCsv
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkTransactionCreateRequest'
+      responses:
+        '201':
+          description: Transactions created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkTransactionCreateResponse'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Account not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/accounts/{account_id}:
+    patch:
+      summary: Update account (extended)
+      description: Existing endpoint - now supports csv_column_mapping field
+      operationId: updateAccount
+      parameters:
+        - name: account_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccountUpdateWithMapping'
+      responses:
+        '200':
+          description: Account updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponseWithMapping'
+
+components:
+  schemas:
+    AmountMode:
+      type: string
+      enum: [single, split]
+
+    CsvColumnMapping:
+      type: object
+      required:
+        - date_column
+        - description_column
+        - amount_mode
+        - date_format
+      properties:
+        date_column:
+          type: string
+          description: CSV header name for date field
+        description_column:
+          type: string
+          description: CSV header name for description field
+        amount_mode:
+          $ref: '#/components/schemas/AmountMode'
+        amount_column:
+          type: string
+          nullable: true
+          description: CSV header for amount (when mode=single)
+        debit_column:
+          type: string
+          nullable: true
+          description: CSV header for debit (when mode=split)
+        credit_column:
+          type: string
+          nullable: true
+          description: CSV header for credit (when mode=split)
+        date_format:
+          type: string
+          description: Date format string (e.g., YYYY-MM-DD, MM/DD/YYYY)
+          default: YYYY-MM-DD
+
+    CsvPreviewRequest:
+      type: object
+      required:
+        - file_content
+      properties:
+        file_content:
+          type: string
+          format: byte
+          description: Base64 encoded CSV file content
+
+    CsvPreviewResponse:
+      type: object
+      required:
+        - headers
+        - sample_rows
+        - row_count
+      properties:
+        headers:
+          type: array
+          items:
+            type: string
+          description: CSV column headers
+        sample_rows:
+          type: array
+          items:
+            type: array
+            items:
+              type: string
+          description: First 5 data rows
+        row_count:
+          type: integer
+          description: Total number of data rows
+        suggested_mapping:
+          $ref: '#/components/schemas/CsvColumnMapping'
+          nullable: true
+          description: Auto-detected mapping if column names match common patterns
+
+    CsvParseRequest:
+      type: object
+      required:
+        - account_id
+        - file_content
+        - mapping
+      properties:
+        account_id:
+          type: string
+          format: uuid
+        file_content:
+          type: string
+          format: byte
+          description: Base64 encoded CSV file content
+        mapping:
+          $ref: '#/components/schemas/CsvColumnMapping'
+
+    ParsedTransactionStatus:
+      type: string
+      enum: [valid, warning, error]
+
+    ParsedTransaction:
+      type: object
+      required:
+        - row_number
+        - date
+        - description
+        - amount
+        - status
+      properties:
+        row_number:
+          type: integer
+          description: 1-based row number in CSV
+        date:
+          type: string
+          format: date
+          description: Parsed date in ISO format
+        description:
+          type: string
+        amount:
+          type: integer
+          description: Amount in cents (negative for debits)
+        status:
+          $ref: '#/components/schemas/ParsedTransactionStatus'
+        status_reason:
+          type: string
+          nullable: true
+          description: Reason for warning/error status
+
+    CsvParseResponse:
+      type: object
+      required:
+        - transactions
+        - valid_count
+        - warning_count
+        - error_count
+      properties:
+        transactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ParsedTransaction'
+        valid_count:
+          type: integer
+        warning_count:
+          type: integer
+        error_count:
+          type: integer
+
+    BulkTransactionCreateRequest:
+      type: object
+      required:
+        - account_id
+        - transactions
+      properties:
+        account_id:
+          type: string
+          format: uuid
+        transactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ParsedTransaction'
+          description: Transactions to create (user-selected valid/warning rows)
+        save_mapping:
+          type: boolean
+          default: true
+          description: Whether to save the column mapping to the account
+        mapping:
+          $ref: '#/components/schemas/CsvColumnMapping'
+          description: Mapping to save (required if save_mapping is true)
+
+    BulkTransactionCreateResponse:
+      type: object
+      required:
+        - created_count
+        - account_id
+      properties:
+        created_count:
+          type: integer
+        account_id:
+          type: string
+          format: uuid
+
+    AccountUpdateWithMapping:
+      type: object
+      properties:
+        name:
+          type: string
+        institution:
+          type: string
+        csv_column_mapping:
+          $ref: '#/components/schemas/CsvColumnMapping'
+          nullable: true
+
+    AccountResponseWithMapping:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        type:
+          type: string
+        institution:
+          type: string
+        is_asset:
+          type: boolean
+        current_balance:
+          type: integer
+        csv_column_mapping:
+          $ref: '#/components/schemas/CsvColumnMapping'
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    ErrorResponse:
+      type: object
+      required:
+        - detail
+      properties:
+        detail:
+          type: string
+          description: Error message

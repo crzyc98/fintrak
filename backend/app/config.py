@@ -9,7 +9,9 @@ import os
 DATABASE_PATH = os.getenv("DATABASE_PATH", "fintrak.duckdb")
 
 # AI Categorization Settings
-CLAUDE_CODE_PATH = os.getenv("CLAUDE_CODE_PATH", "claude")
+CLAUDE_CODE_PATH = os.getenv("CLAUDE_CODE_PATH", "claude")  # Deprecated: retained for rollback
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
 CATEGORIZATION_BATCH_SIZE = int(os.getenv("CATEGORIZATION_BATCH_SIZE", "50"))
 CATEGORIZATION_CONFIDENCE_THRESHOLD = float(
     os.getenv("CATEGORIZATION_CONFIDENCE_THRESHOLD", "0.7")
