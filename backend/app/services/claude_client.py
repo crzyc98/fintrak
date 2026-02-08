@@ -1,6 +1,12 @@
 """
 Claude Code CLI client for AI-powered categorization.
 Uses subprocess to invoke Claude in headless mode.
+
+DEPRECATED: This module is retained for rollback purposes only.
+New code should use gemini_client.py instead.
+
+To rollback to this client, update categorization_service.py imports:
+    from app.services.claude_client import invoke_and_parse, ClaudeClientError as AIClientError
 """
 import json
 import logging

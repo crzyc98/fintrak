@@ -7,6 +7,7 @@
 - FastAPI 0.115.6
 - DuckDB 1.1.3 (file-based: `fintrak.duckdb`)
 - Pydantic 2.10.4
+- google-genai (Gemini API for AI categorization)
 
 **Frontend:**
 - React 19.2.3
@@ -61,3 +62,26 @@ DuckDB embedded database at project root (`fintrak.duckdb`). Schema managed via 
 - Base URL: `http://localhost:8000`
 - Docs: `http://localhost:8000/docs`
 - All endpoints return JSON, use Pydantic models for request/response validation
+
+## Environment Variables
+
+**Required for AI Categorization:**
+- `GEMINI_API_KEY` - Google AI Studio API key (get from https://aistudio.google.com/apikey)
+
+**Optional:**
+- `GEMINI_MODEL` - Model to use (default: `gemini-1.5-flash`)
+- `CATEGORIZATION_BATCH_SIZE` - Transactions per AI batch (default: 50)
+- `CATEGORIZATION_TIMEOUT_SECONDS` - API timeout (default: 120)
+
+## AI Categorization
+
+The app uses Google Gemini API for transaction categorization:
+- Module: `backend/app/services/gemini_client.py`
+- Fallback: `backend/app/services/claude_client.py` (deprecated, retained for rollback)
+- Error classes: `AIClientError`, `AITimeoutError`, `AIInvocationError`
+- Retry logic: Exponential backoff (2s, 4s, 8s delays)
+
+## Recent Changes
+
+- 007-gemini-api-integration: Replaced Claude CLI with Gemini API for AI categorization
+- 006-date-range-presets: Added date range preset filters to transactions view

@@ -19,9 +19,9 @@ from app.models.categorization import (
     CategorizationBatchResponse,
     CategorizationTriggerRequest,
 )
-from app.services.claude_client import (
+from app.services.gemini_client import (
     invoke_and_parse,
-    ClaudeClientError,
+    AIClientError,
 )
 from app.services.merchant_normalizer import normalize
 from app.services.batch_service import batch_service
@@ -236,8 +236,8 @@ Only respond with the JSON array, no additional text."""
 
         try:
             raw_results = invoke_and_parse(prompt)
-        except ClaudeClientError as e:
-            logger.error(f"Claude invocation failed: {e}")
+        except AIClientError as e:
+            logger.error(f"AI invocation failed: {e}")
             return []
 
         # Parse and validate results
