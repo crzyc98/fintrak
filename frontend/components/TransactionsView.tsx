@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Account, Category } from '../types';
 import {
   fetchTransactions,
@@ -7,8 +7,10 @@ import {
   fetchAccounts,
   fetchCategories,
   triggerCategorization,
+  nlSearch,
   TransactionData,
   TransactionFiltersData,
+  NLSearchResponseData,
 } from '../src/services/api';
 
 // Date Range Preset Types and Definitions
@@ -80,7 +82,12 @@ const TransactionsView: React.FC = () => {
   const [filters, setFilters] = useState<TransactionFiltersData>({});
   const [showFilters, setShowFilters] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [searchDebounce, setSearchDebounce] = useState<NodeJS.Timeout | null>(null);
+
+  // NL Search state
+  const [isNLSearching, setIsNLSearching] = useState(false);
+  const [nlSearchResponse, setNlSearchResponse] = useState<NLSearchResponseData | null>(null);
+  const [showExamples, setShowExamples] = useState(false);
+  const nlAbortRef = useRef<AbortController | null>(null);
 
   // Reference data
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -142,17 +149,65 @@ const TransactionsView: React.FC = () => {
     loadTransactions();
   }, [loadTransactions]);
 
-  // Search debounce
-  useEffect(() => {
-    if (searchDebounce) {
-      clearTimeout(searchDebounce);
-    }
-    const timeout = setTimeout(() => {
-      setFilters((prev) => ({ ...prev, search: searchTerm || undefined }));
+  // NL Search handler — triggered on Enter key
+  const handleNLSearch = useCallback(async () => {
+    const query = searchTerm.trim();
+    if (!query) {
+      // Clear NL search, revert to regular fetch
+      setNlSearchResponse(null);
+      setFilters((prev) => {
+        const { search: _, ...rest } = prev;
+        return rest;
+      });
       setCurrentPage(1);
-    }, 300);
-    setSearchDebounce(timeout);
-    return () => clearTimeout(timeout);
+      return;
+    }
+
+    // Abort any in-flight NL search
+    if (nlAbortRef.current) {
+      nlAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    nlAbortRef.current = controller;
+
+    try {
+      setIsNLSearching(true);
+      setError(null);
+      setShowExamples(false);
+      const offset = (currentPage - 1) * limit;
+      const response = await nlSearch({
+        query,
+        account_id: filters.account_id || undefined,
+        category_id: filters.category_id || undefined,
+        date_from: filters.date_from || undefined,
+        date_to: filters.date_to || undefined,
+        amount_min: filters.amount_min,
+        amount_max: filters.amount_max,
+        reviewed: filters.reviewed,
+        limit,
+        offset,
+      }, controller.signal);
+
+      setNlSearchResponse(response);
+      setTransactions(response.items);
+      setTotal(response.total);
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return; // Silently ignore aborted requests
+      }
+      setError(err instanceof Error ? err.message : 'Search failed');
+      // Fallback to regular fetch
+      setNlSearchResponse(null);
+    } finally {
+      setIsNLSearching(false);
+    }
+  }, [searchTerm, currentPage, limit, filters]);
+
+  // When search is cleared, remove NL response and reload with regular filters
+  useEffect(() => {
+    if (!searchTerm.trim() && nlSearchResponse) {
+      setNlSearchResponse(null);
+    }
   }, [searchTerm]);
 
   // Formatting helpers
@@ -201,6 +256,7 @@ const TransactionsView: React.FC = () => {
     setFilters({});
     setSearchTerm('');
     setActivePreset(null);
+    setNlSearchResponse(null);
     setCurrentPage(1);
   };
 
@@ -213,7 +269,16 @@ const TransactionsView: React.FC = () => {
   };
 
   const hasActiveFilters =
-    Object.keys(filters).filter((k) => k !== 'limit' && k !== 'offset').length > 0 || searchTerm;
+    Object.keys(filters).filter((k) => k !== 'limit' && k !== 'offset').length > 0 || searchTerm || nlSearchResponse;
+
+  // Example NL queries
+  const EXAMPLE_QUERIES = [
+    'coffee purchases last month',
+    'Amazon orders over $50',
+    'groceries in January',
+    'subscriptions this year',
+    'restaurants last 30 days',
+  ];
 
   // Edit handlers
   const handleCategoryEdit = (transaction: TransactionData) => {
@@ -374,11 +439,19 @@ const TransactionsView: React.FC = () => {
           <div className="relative">
             <input
               type="text"
-              placeholder="Search transactions..."
+              placeholder="Search with AI... (press Enter)"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-64 bg-[#0a0f1d] border border-white/5 rounded-xl py-2 pl-10 pr-4 text-sm font-medium focus:outline-none focus:ring-1 focus:ring-blue-500/50 placeholder-gray-600 text-gray-300"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  handleNLSearch();
+                }
+              }}
+              onFocus={() => !searchTerm.trim() && setShowExamples(true)}
+              onBlur={() => setTimeout(() => setShowExamples(false), 200)}
+              className="w-80 bg-[#0a0f1d] border border-white/5 rounded-xl py-2 pl-10 pr-10 text-sm font-medium focus:outline-none focus:ring-1 focus:ring-purple-500/50 placeholder-gray-600 text-gray-300"
             />
+            {/* Search icon */}
             <svg
               className="w-4 h-4 absolute left-3.5 top-2.5 text-gray-500"
               fill="none"
@@ -392,6 +465,56 @@ const TransactionsView: React.FC = () => {
                 d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
               />
             </svg>
+            {/* AI sparkle icon */}
+            <svg
+              className={`w-4 h-4 absolute right-3.5 top-2.5 transition-colors ${
+                isNLSearching ? 'text-purple-400 animate-pulse' : 'text-purple-500/50'
+              }`}
+              viewBox="0 0 24 24"
+              fill="currentColor"
+            >
+              <path d="M12 2L13.09 8.26L18 6L15.74 10.91L22 12L15.74 13.09L18 18L13.09 15.74L12 22L10.91 15.74L6 18L8.26 13.09L2 12L8.26 10.91L6 6L10.91 8.26L12 2Z" />
+            </svg>
+            {/* Example queries dropdown */}
+            {showExamples && !searchTerm.trim() && (
+              <div className="absolute top-full left-0 right-0 mt-1 bg-[#0a0f1d] border border-white/10 rounded-xl shadow-xl z-20 overflow-hidden">
+                <div className="px-3 py-2 text-[10px] font-bold text-gray-500 uppercase tracking-widest">
+                  Try asking
+                </div>
+                {EXAMPLE_QUERIES.map((q) => (
+                  <button
+                    key={q}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      setSearchTerm(q);
+                      setShowExamples(false);
+                      // Trigger search after state update
+                      setTimeout(() => {
+                        nlAbortRef.current?.abort();
+                        const controller = new AbortController();
+                        nlAbortRef.current = controller;
+                        setIsNLSearching(true);
+                        nlSearch({ query: q, limit: 50, offset: 0 }, controller.signal)
+                          .then((response) => {
+                            setNlSearchResponse(response);
+                            setTransactions(response.items);
+                            setTotal(response.total);
+                          })
+                          .catch((err) => {
+                            if (!(err instanceof DOMException && err.name === 'AbortError')) {
+                              setError(err instanceof Error ? err.message : 'Search failed');
+                            }
+                          })
+                          .finally(() => setIsNLSearching(false));
+                      }, 0);
+                    }}
+                    className="w-full px-3 py-2 text-sm text-gray-400 hover:bg-white/5 hover:text-white text-left transition-colors"
+                  >
+                    {q}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Filter Toggle */}
@@ -552,6 +675,74 @@ const TransactionsView: React.FC = () => {
             <button onClick={() => setError(null)} className="text-red-300 hover:text-white">
               Dismiss
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* NL Search Interpretation Banner */}
+      {nlSearchResponse && !nlSearchResponse.fallback && nlSearchResponse.interpretation?.summary && (
+        <div className="mx-8 mt-3 flex items-center gap-2">
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-purple-500/10 border border-purple-500/20 rounded-lg text-sm text-purple-300">
+            <svg className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2L13.09 8.26L18 6L15.74 10.91L22 12L15.74 13.09L18 18L13.09 15.74L12 22L10.91 15.74L6 18L8.26 13.09L2 12L8.26 10.91L6 6L10.91 8.26L12 2Z" />
+            </svg>
+            <span>
+              {filters.account_id || filters.category_id ? (
+                <>
+                  {filters.account_id && accounts.find(a => a.id === filters.account_id) && (
+                    <span className="text-gray-400">
+                      {accounts.find(a => a.id === filters.account_id)!.name} +{' '}
+                    </span>
+                  )}
+                  AI: {nlSearchResponse.interpretation.summary}
+                </>
+              ) : (
+                <>Showing: {nlSearchResponse.interpretation.summary}</>
+              )}
+            </span>
+            <button
+              onClick={() => {
+                setSearchTerm('');
+                setNlSearchResponse(null);
+                loadTransactions();
+              }}
+              className="ml-1 text-purple-400 hover:text-purple-300"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Fallback Notice */}
+      {nlSearchResponse?.fallback && nlSearchResponse.fallback_reason && (
+        <div className="mx-8 mt-3 px-3 py-2 bg-yellow-500/10 border border-yellow-500/20 rounded-lg text-sm text-yellow-300 flex items-center gap-2">
+          <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+          </svg>
+          <span>{nlSearchResponse.fallback_reason}</span>
+        </div>
+      )}
+
+      {/* NL Search Empty Results Guidance */}
+      {nlSearchResponse && !nlSearchResponse.fallback && nlSearchResponse.total === 0 && nlSearchResponse.interpretation && (
+        <div className="mx-8 mt-3 px-4 py-3 bg-[#0a0f1d] border border-white/10 rounded-lg text-sm text-gray-400">
+          <p className="mb-2">No transactions matched your search. Try a broader query:</p>
+          <div className="flex flex-wrap gap-2">
+            {['all purchases last month', 'transactions this year', 'expenses over $100'].map((suggestion) => (
+              <button
+                key={suggestion}
+                onClick={() => {
+                  setSearchTerm(suggestion);
+                  setTimeout(() => handleNLSearch(), 0);
+                }}
+                className="px-2.5 py-1 text-xs bg-white/5 border border-white/10 rounded-lg text-gray-300 hover:text-white hover:border-white/20 transition-colors"
+              >
+                {suggestion}
+              </button>
+            ))}
           </div>
         </div>
       )}

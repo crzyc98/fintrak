@@ -8,6 +8,8 @@ from app.models.transaction import (
     TransactionFilters,
     TransactionListResponse,
     MonthlySpendingResponse,
+    NLSearchRequest,
+    NLSearchResponse,
 )
 from app.models.review import (
     BulkOperationRequest,
@@ -50,6 +52,18 @@ async def list_transactions(
         offset=offset,
     )
     return transaction_service.get_list(filters)
+
+
+@router.post("/nl-search", response_model=NLSearchResponse)
+async def nl_search(request: NLSearchRequest):
+    """
+    Interpret a natural language query and return matching transactions.
+
+    Uses Gemini AI to parse the query into structured filters.
+    Falls back to basic text search when AI is unavailable.
+    """
+    from app.services.nl_search_service import execute_nl_search
+    return execute_nl_search(request)
 
 
 # Review workflow endpoints - must be before /{transaction_id} routes

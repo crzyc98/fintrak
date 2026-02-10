@@ -20,6 +20,9 @@ CATEGORIZATION_TIMEOUT_SECONDS = int(
     os.getenv("CATEGORIZATION_TIMEOUT_SECONDS", "120")
 )
 
+# NL Search Settings
+NL_SEARCH_TIMEOUT_SECONDS = int(os.getenv("NL_SEARCH_TIMEOUT_SECONDS", "15"))
+
 # Retry settings for AI calls
 CATEGORIZATION_MAX_RETRIES = 3
 CATEGORIZATION_RETRY_DELAYS = [2, 4, 8]  # Exponential backoff in seconds
