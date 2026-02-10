@@ -77,6 +77,44 @@ class TransactionListResponse(BaseModel):
     has_more: bool
 
 
+class InterpretedFilters(BaseModel):
+    """Structured representation of what Gemini extracted from a NL query."""
+    date_from: Optional[date] = None
+    date_to: Optional[date] = None
+    amount_min: Optional[int] = None
+    amount_max: Optional[int] = None
+    category_ids: Optional[list[str]] = None
+    merchant_keywords: Optional[list[str]] = None
+    description_keywords: Optional[list[str]] = None
+    summary: Optional[str] = None
+
+
+class NLSearchRequest(BaseModel):
+    """Request body for the NL search endpoint."""
+    query: str = Field(..., min_length=1, max_length=500)
+    account_id: Optional[str] = None
+    category_id: Optional[str] = None
+    date_from: Optional[date] = None
+    date_to: Optional[date] = None
+    amount_min: Optional[int] = None
+    amount_max: Optional[int] = None
+    reviewed: Optional[bool] = None
+    limit: int = Field(50, ge=1, le=200)
+    offset: int = Field(0, ge=0)
+
+
+class NLSearchResponse(BaseModel):
+    """Response from the NL search endpoint."""
+    items: list[TransactionResponse]
+    total: int
+    limit: int
+    offset: int
+    has_more: bool
+    interpretation: Optional[InterpretedFilters] = None
+    fallback: bool = False
+    fallback_reason: Optional[str] = None
+
+
 class SpendingDataPoint(BaseModel):
     """A single data point for the spending chart"""
     day: int  # Day of month (1-31)

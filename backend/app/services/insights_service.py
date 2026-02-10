@@ -83,6 +83,7 @@ class InsightsService:
                 WHERE t.date >= ? AND t.date <= ?
                   AND t.amount < 0
                   AND t.category_id IS NOT NULL
+                  AND c.name NOT IN ('Transfers', 'Trades')
                 GROUP BY t.category_id, c.name, c.emoji
                 ORDER BY total_amount_cents DESC
                 LIMIT 5
@@ -119,6 +120,7 @@ class InsightsService:
                 WHERE t.date >= ? AND t.date <= ?
                   AND t.amount < 0
                   AND t.category_id IS NOT NULL
+                  AND c.name NOT IN ('Transfers', 'Trades')
                 GROUP BY t.category_id, c.name, c.emoji
                 ORDER BY total_amount_cents DESC
                 """,
@@ -149,9 +151,11 @@ class InsightsService:
                     t.category_id,
                     SUM(ABS(t.amount)) AS total_amount_cents
                 FROM transactions t
+                JOIN categories c ON t.category_id = c.id
                 WHERE t.date >= ? AND t.date <= ?
                   AND t.amount < 0
                   AND t.category_id IS NOT NULL
+                  AND c.name NOT IN ('Transfers', 'Trades')
                 GROUP BY t.category_id
                 """,
                 [prev_start, prev_end],
@@ -185,10 +189,12 @@ class InsightsService:
             row = conn.execute(
                 """
                 SELECT
-                    COUNT(CASE WHEN category_id IS NOT NULL AND amount < 0 THEN 1 END) AS categorized,
-                    COUNT(CASE WHEN category_id IS NULL AND amount < 0 THEN 1 END) AS uncategorized
-                FROM transactions
-                WHERE date >= ? AND date <= ?
+                    COUNT(CASE WHEN t.category_id IS NOT NULL AND t.amount < 0
+                          AND c.name NOT IN ('Transfers', 'Trades') THEN 1 END) AS categorized,
+                    COUNT(CASE WHEN t.category_id IS NULL AND t.amount < 0 THEN 1 END) AS uncategorized
+                FROM transactions t
+                LEFT JOIN categories c ON t.category_id = c.id
+                WHERE t.date >= ? AND t.date <= ?
                 """,
                 [date_from, date_to],
             ).fetchone()
@@ -214,6 +220,7 @@ class InsightsService:
                 WHERE t.date >= ? AND t.date <= ?
                   AND t.amount < 0
                   AND t.category_id IS NOT NULL
+                  AND c.name NOT IN ('Transfers', 'Trades')
                 GROUP BY t.category_id, c.name
                 HAVING COUNT(*) >= 3
                 """,
@@ -237,12 +244,14 @@ class InsightsService:
             rows = conn.execute(
                 """
                 WITH category_avgs AS (
-                    SELECT category_id, AVG(ABS(amount)) AS avg_amount
-                    FROM transactions
-                    WHERE date >= ? AND date <= ?
-                      AND amount < 0
-                      AND category_id IS NOT NULL
-                    GROUP BY category_id
+                    SELECT t2.category_id, AVG(ABS(t2.amount)) AS avg_amount
+                    FROM transactions t2
+                    JOIN categories c2 ON t2.category_id = c2.id
+                    WHERE t2.date >= ? AND t2.date <= ?
+                      AND t2.amount < 0
+                      AND t2.category_id IS NOT NULL
+                      AND c2.name NOT IN ('Transfers', 'Trades')
+                    GROUP BY t2.category_id
                     HAVING COUNT(*) >= 3
                 )
                 SELECT
@@ -279,14 +288,16 @@ class InsightsService:
 
     @staticmethod
     def get_income_totals(date_from: date, date_to: date) -> int:
-        """Get total income (positive transactions) for a period."""
+        """Get total income (positive transactions) for a period, excluding transfers."""
         with get_db() as conn:
             row = conn.execute(
                 """
-                SELECT COALESCE(SUM(amount), 0)
-                FROM transactions
-                WHERE date >= ? AND date <= ?
-                  AND amount > 0
+                SELECT COALESCE(SUM(t.amount), 0)
+                FROM transactions t
+                LEFT JOIN categories c ON t.category_id = c.id
+                WHERE t.date >= ? AND t.date <= ?
+                  AND t.amount > 0
+                  AND (c.name IS NULL OR c.name NOT IN ('Transfers', 'Trades'))
                 """,
                 [date_from, date_to],
             ).fetchone()

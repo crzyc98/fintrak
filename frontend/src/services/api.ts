@@ -747,6 +747,69 @@ export async function generateInsights(
   return response.json();
 }
 
+// NL Search API
+export interface InterpretedFiltersData {
+  date_from?: string | null;
+  date_to?: string | null;
+  amount_min?: number | null;
+  amount_max?: number | null;
+  category_ids?: string[] | null;
+  merchant_keywords?: string[] | null;
+  description_keywords?: string[] | null;
+  summary?: string | null;
+}
+
+export interface NLSearchRequestData {
+  query: string;
+  account_id?: string | null;
+  category_id?: string | null;
+  date_from?: string | null;
+  date_to?: string | null;
+  amount_min?: number | null;
+  amount_max?: number | null;
+  reviewed?: boolean | null;
+  limit?: number;
+  offset?: number;
+}
+
+export interface NLSearchResponseData {
+  items: TransactionData[];
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+  interpretation: InterpretedFiltersData | null;
+  fallback: boolean;
+  fallback_reason: string | null;
+}
+
+export async function nlSearch(
+  request: NLSearchRequestData,
+  signal?: AbortSignal,
+): Promise<NLSearchResponseData> {
+  const response = await fetch(`${API_BASE_URL}/api/transactions/nl-search`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+    signal,
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    let message: string;
+    if (Array.isArray(error.detail)) {
+      const firstError = error.detail[0];
+      const field = firstError?.loc?.slice(-1)[0] || 'field';
+      message = `${field}: ${firstError?.msg || 'validation error'}`;
+    } else {
+      message = error.detail || `HTTP ${response.status}`;
+    }
+    throw new Error(message);
+  }
+
+  return response.json();
+}
+
 // Monthly Spending API
 export interface SpendingDataPoint {
   day: number;
