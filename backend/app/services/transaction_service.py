@@ -333,9 +333,15 @@ class TransactionService:
                 [row_dict[c] for c in cols],
             )
 
-        # If category changed and transaction has normalized_merchant, create a rule
+        # If category changed and transaction has normalized_merchant, create a merchant rule
         if category_changed and new_category_id and existing.normalized_merchant:
             self._create_rule_from_correction(existing.normalized_merchant, new_category_id)
+        elif category_changed and new_category_id and not existing.normalized_merchant:
+            # No normalized merchant — try creating a description-based pattern rule
+            if existing.description and existing.description.strip():
+                self._create_desc_rule_from_correction(
+                    existing.description, existing.account_id, new_category_id
+                )
 
         return self.get_by_id(transaction_id)
 
@@ -365,6 +371,38 @@ class TransactionService:
             )
         except Exception as e:
             logger.warning(f"Failed to create rule from correction: {e}")
+
+    def _create_desc_rule_from_correction(
+        self,
+        description: str,
+        account_id: str,
+        category_id: str,
+    ) -> None:
+        """
+        Create a description pattern rule when user manually corrects a category
+        and the transaction has no normalized merchant.
+        """
+        from app.services.pattern_extractor import extract_pattern
+        from app.services.desc_rule_service import desc_rule_service
+        from app.models.categorization import DescriptionPatternRuleCreate
+
+        try:
+            pattern = extract_pattern(description)
+            if not pattern:
+                return
+
+            rule_data = DescriptionPatternRuleCreate(
+                description_pattern=pattern,
+                account_id=account_id,
+                category_id=category_id,
+            )
+            desc_rule_service.create_rule(rule_data)
+            logger.info(
+                f"Created desc rule from correction: '{pattern}' "
+                f"for account {account_id} -> {category_id}"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to create desc rule from correction: {e}")
 
     def delete(self, transaction_id: str) -> bool:
         """Delete a transaction"""

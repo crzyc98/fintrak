@@ -1,7 +1,7 @@
 """
 Pydantic models for AI categorization feature.
 """
-from typing import Optional
+from typing import Optional, Literal
 from datetime import datetime
 from pydantic import BaseModel, Field
 
@@ -20,9 +20,13 @@ class CategorizationRuleCreate(BaseModel):
 class CategorizationRuleResponse(BaseModel):
     """Model for categorization rule in API responses"""
     id: str
-    merchant_pattern: str
+    merchant_pattern: Optional[str] = None
     category_id: str
     category_name: Optional[str] = None  # Joined from categories table
+    rule_type: Literal["merchant", "description"] = "merchant"
+    description_pattern: Optional[str] = None
+    account_id: Optional[str] = None
+    account_name: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -30,10 +34,37 @@ class CategorizationRuleResponse(BaseModel):
 
 
 class CategorizationRuleListResponse(BaseModel):
-    """Paginated list of categorization rules"""
+    """Paginated list of categorization rules (merchant + description)"""
     rules: list[CategorizationRuleResponse]
     total: int
     has_more: bool
+
+
+# ============================================================================
+# Description Pattern Rule Models
+# ============================================================================
+
+
+class DescriptionPatternRuleCreate(BaseModel):
+    """Model for creating a description-based pattern rule"""
+    description_pattern: str = Field(..., min_length=1, max_length=500)
+    account_id: str
+    category_id: str
+
+
+class DescriptionPatternRuleResponse(BaseModel):
+    """Model for description pattern rule in API responses"""
+    id: str
+    account_id: str
+    account_name: Optional[str] = None
+    description_pattern: str
+    category_id: str
+    category_name: Optional[str] = None
+    rule_type: Literal["description"] = "description"
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 # ============================================================================
@@ -49,6 +80,7 @@ class CategorizationBatchResponse(BaseModel):
     success_count: int
     failure_count: int
     rule_match_count: int
+    desc_rule_match_count: int = 0
     ai_match_count: int
     skipped_count: int
     duration_ms: Optional[int] = None
@@ -100,3 +132,14 @@ class NormalizationResponse(BaseModel):
     original: str
     normalized: str
     tokens_removed: list[str] = []
+
+
+class PatternPreviewRequest(BaseModel):
+    """Request body for description pattern preview"""
+    description: str
+
+
+class PatternPreviewResponse(BaseModel):
+    """Response for description pattern preview"""
+    original: str
+    pattern: str

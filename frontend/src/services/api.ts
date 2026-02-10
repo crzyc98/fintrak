@@ -175,7 +175,7 @@ export interface TransactionData {
   // Categorization fields
   normalized_merchant?: string | null;
   confidence_score?: number | null;
-  categorization_source?: 'rule' | 'ai' | 'manual' | 'none' | null;
+  categorization_source?: 'rule' | 'desc_rule' | 'ai' | 'manual' | 'none' | null;
   // Joined fields
   account_name?: string;
   category_name?: string;
@@ -267,6 +267,7 @@ export interface CategorizationBatchResponseData {
   success_count: number;
   failure_count: number;
   rule_match_count: number;
+  desc_rule_match_count: number;
   ai_match_count: number;
   skipped_count: number;
   duration_ms: number | null;
@@ -313,15 +314,21 @@ export async function getBatch(
 
 // Categorization Rules API
 export interface CategorizationRuleCreateData {
-  merchant_pattern: string;
+  merchant_pattern?: string;
   category_id: string;
+  description_pattern?: string;
+  account_id?: string;
 }
 
 export interface CategorizationRuleResponseData {
   id: string;
-  merchant_pattern: string;
+  merchant_pattern: string | null;
   category_id: string;
   category_name: string | null;
+  rule_type: 'merchant' | 'description';
+  description_pattern: string | null;
+  account_id: string | null;
+  account_name: string | null;
   created_at: string;
 }
 
@@ -334,10 +341,12 @@ export interface CategorizationRuleListResponseData {
 export async function listRules(
   categoryId?: string,
   limit: number = 100,
-  offset: number = 0
+  offset: number = 0,
+  ruleType?: 'merchant' | 'description'
 ): Promise<CategorizationRuleListResponseData> {
   const params = new URLSearchParams();
   if (categoryId) params.append('category_id', categoryId);
+  if (ruleType) params.append('rule_type', ruleType);
   params.append('limit', limit.toString());
   params.append('offset', offset.toString());
 
@@ -358,6 +367,25 @@ export async function createRule(
 export async function deleteRule(ruleId: string): Promise<void> {
   await fetchApi<void>(`/api/categorization/rules/${ruleId}`, {
     method: 'DELETE',
+  });
+}
+
+// Pattern Preview API
+export interface PatternPreviewRequestData {
+  description: string;
+}
+
+export interface PatternPreviewResponseData {
+  original: string;
+  pattern: string;
+}
+
+export async function previewPattern(
+  description: string
+): Promise<PatternPreviewResponseData> {
+  return fetchApi<PatternPreviewResponseData>('/api/categorization/preview-pattern', {
+    method: 'POST',
+    body: JSON.stringify({ description }),
   });
 }
 

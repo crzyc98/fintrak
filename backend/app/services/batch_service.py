@@ -42,10 +42,10 @@ class BatchService:
                 """
                 INSERT INTO categorization_batches (
                     id, import_id, transaction_count, success_count, failure_count,
-                    rule_match_count, ai_match_count, skipped_count,
+                    rule_match_count, desc_rule_match_count, ai_match_count, skipped_count,
                     duration_ms, error_message, started_at, completed_at
                 )
-                VALUES (?, ?, ?, 0, 0, 0, 0, 0, NULL, NULL, ?, NULL)
+                VALUES (?, ?, ?, 0, 0, 0, 0, 0, 0, NULL, NULL, ?, NULL)
                 """,
                 [batch_id, import_id, transaction_count, started_at],
             )
@@ -61,6 +61,7 @@ class BatchService:
         success_count: Optional[int] = None,
         failure_count: Optional[int] = None,
         rule_match_count: Optional[int] = None,
+        desc_rule_match_count: Optional[int] = None,
         ai_match_count: Optional[int] = None,
         skipped_count: Optional[int] = None,
     ) -> None:
@@ -72,6 +73,7 @@ class BatchService:
             success_count: New success count (or None to keep current)
             failure_count: New failure count
             rule_match_count: New rule match count
+            desc_rule_match_count: New description rule match count
             ai_match_count: New AI match count
             skipped_count: New skipped count
         """
@@ -87,6 +89,9 @@ class BatchService:
         if rule_match_count is not None:
             updates.append("rule_match_count = ?")
             values.append(rule_match_count)
+        if desc_rule_match_count is not None:
+            updates.append("desc_rule_match_count = ?")
+            values.append(desc_rule_match_count)
         if ai_match_count is not None:
             updates.append("ai_match_count = ?")
             values.append(ai_match_count)
@@ -111,6 +116,7 @@ class BatchService:
         success_count: int,
         failure_count: int,
         rule_match_count: int,
+        desc_rule_match_count: int,
         ai_match_count: int,
         skipped_count: int,
         error_message: Optional[str] = None,
@@ -122,7 +128,8 @@ class BatchService:
             batch_id: The batch ID to complete
             success_count: Final success count
             failure_count: Final failure count
-            rule_match_count: Final rule match count
+            rule_match_count: Final merchant rule match count
+            desc_rule_match_count: Final description rule match count
             ai_match_count: Final AI match count
             skipped_count: Final skipped count
             error_message: Optional error message if batch failed
@@ -155,6 +162,7 @@ class BatchService:
                 SET success_count = ?,
                     failure_count = ?,
                     rule_match_count = ?,
+                    desc_rule_match_count = ?,
                     ai_match_count = ?,
                     skipped_count = ?,
                     duration_ms = ?,
@@ -166,6 +174,7 @@ class BatchService:
                     success_count,
                     failure_count,
                     rule_match_count,
+                    desc_rule_match_count,
                     ai_match_count,
                     skipped_count,
                     duration_ms,
@@ -178,8 +187,8 @@ class BatchService:
         logger.info(
             f"Completed batch {batch_id}: "
             f"{success_count} success, {failure_count} failed, "
-            f"{rule_match_count} rules, {ai_match_count} AI, "
-            f"{skipped_count} skipped in {duration_ms}ms"
+            f"{rule_match_count} merchant rules, {desc_rule_match_count} desc rules, "
+            f"{ai_match_count} AI, {skipped_count} skipped in {duration_ms}ms"
         )
 
         return self.get_by_id(batch_id)
@@ -190,7 +199,7 @@ class BatchService:
             result = conn.execute(
                 """
                 SELECT id, import_id, transaction_count, success_count, failure_count,
-                       rule_match_count, ai_match_count, skipped_count,
+                       rule_match_count, desc_rule_match_count, ai_match_count, skipped_count,
                        duration_ms, error_message, started_at, completed_at
                 FROM categorization_batches
                 WHERE id = ?
@@ -208,12 +217,13 @@ class BatchService:
             success_count=result[3],
             failure_count=result[4],
             rule_match_count=result[5],
-            ai_match_count=result[6],
-            skipped_count=result[7],
-            duration_ms=result[8],
-            error_message=result[9],
-            started_at=result[10],
-            completed_at=result[11],
+            desc_rule_match_count=result[6],
+            ai_match_count=result[7],
+            skipped_count=result[8],
+            duration_ms=result[9],
+            error_message=result[10],
+            started_at=result[11],
+            completed_at=result[12],
         )
 
     def get_list(
@@ -242,7 +252,7 @@ class BatchService:
             result = conn.execute(
                 """
                 SELECT id, import_id, transaction_count, success_count, failure_count,
-                       rule_match_count, ai_match_count, skipped_count,
+                       rule_match_count, desc_rule_match_count, ai_match_count, skipped_count,
                        duration_ms, error_message, started_at, completed_at
                 FROM categorization_batches
                 ORDER BY started_at DESC
@@ -259,12 +269,13 @@ class BatchService:
                 success_count=row[3],
                 failure_count=row[4],
                 rule_match_count=row[5],
-                ai_match_count=row[6],
-                skipped_count=row[7],
-                duration_ms=row[8],
-                error_message=row[9],
-                started_at=row[10],
-                completed_at=row[11],
+                desc_rule_match_count=row[6],
+                ai_match_count=row[7],
+                skipped_count=row[8],
+                duration_ms=row[9],
+                error_message=row[10],
+                started_at=row[11],
+                completed_at=row[12],
             )
             for row in result
         ]
