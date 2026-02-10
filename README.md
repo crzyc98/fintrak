@@ -1,14 +1,15 @@
-# FinTrack
+# FinTrak
 
-A personal finance tracking application with AI-powered categorization and transaction review workflows.
+A personal finance tracking application with AI-powered categorization, spending insights, and transaction review workflows.
 
 ## Overview
 
-FinTrack helps you manage your finances by:
+FinTrak helps you manage your finances by:
 - Importing and organizing transactions from bank accounts
-- AI-powered automatic categorization
+- AI-powered automatic categorization via Google Gemini
+- AI-generated spending insights and reports
+- Net worth tracking across accounts
 - Efficient bulk review workflows
-- Budget tracking and spending insights
 
 ## Architecture
 
@@ -33,12 +34,14 @@ fintrak/
 - FastAPI 0.115.6
 - DuckDB 1.1.3 (embedded database)
 - Pydantic 2.10.4
+- Google Gemini API (AI categorization & insights)
 
 **Frontend:**
 - React 19.2.3
-- TypeScript 5.x
+- TypeScript 5.8.2
 - Vite 6.2.0
 - Tailwind CSS
+- Recharts (data visualization)
 
 ## Quick Start
 
@@ -76,6 +79,22 @@ Open in VS Code with the Dev Containers extension, or use GitHub Codespaces. The
 
 Everything installs automatically on container creation.
 
+### Environment Variables
+
+Create a `.env` file in `backend/` (auto-loaded via python-dotenv):
+
+```
+GEMINI_API_KEY=your-key-here
+```
+
+Get a key at https://aistudio.google.com/apikey. Optional settings:
+
+| Variable | Default | Description |
+|---|---|---|
+| `GEMINI_MODEL` | `gemini-1.5-flash` | Gemini model to use |
+| `CATEGORIZATION_BATCH_SIZE` | `50` | Transactions per AI batch |
+| `CATEGORIZATION_TIMEOUT_SECONDS` | `120` | API timeout |
+
 ### Manual Setup
 
 If you prefer to run services individually:
@@ -99,14 +118,27 @@ npm run dev
 ## Features
 
 ### Transaction Management
-- Import transactions from CSV
+- Import transactions from CSV (auto-detects date formats including 2-digit years)
 - Filter by account, category, date, amount
 - Search transactions
 
 ### AI Categorization
 - Rule-based categorization from merchant patterns
-- AI-powered categorization for unknown merchants
+- Gemini-powered categorization for unknown merchants
 - Manual category corrections create new rules
+- Batch processing with exponential backoff retry
+
+### AI Spending Insights
+- Summary and full report modes
+- Period selection: current month, last month, or last 3 months
+- Top category breakdown with period-over-period comparison
+- Anomaly detection (unusual transactions vs category average)
+- AI-generated suggestions and analysis
+
+### Net Worth Dashboard
+- Live account balances across all accounts
+- Asset vs liability breakdown
+- Historical trend visualization
 
 ### Review Workflow
 - View unreviewed transactions grouped by date

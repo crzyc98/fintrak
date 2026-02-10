@@ -19,6 +19,8 @@
 
 ```
 fintrak/
+├── .claude/commands/     # Shared Claude Code skills (committed)
+├── .specify/             # Speckit templates & scripts (committed)
 ├── backend/
 │   ├── app/
 │   │   ├── models/       # Pydantic models
