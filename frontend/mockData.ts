@@ -232,9 +232,3 @@ export const SPENDING_CHART_DATA = [
   { day: 31, amount: 900, pace: 1000 }, 
 ];
 
-export const NET_WORTH_DATA = [
-  { date: 'Jan', assets: 2100000, debts: 180000 },
-  { date: 'Feb', assets: 2150000, debts: 178000 },
-  { date: 'Mar', assets: 2180000, debts: 175000 },
-  { date: 'Apr', assets: 2208011, debts: 173186 },
-];

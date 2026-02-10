@@ -82,6 +82,10 @@ The app uses Google Gemini API for transaction categorization:
 - Retry logic: Exponential backoff (2s, 4s, 8s delays)
 
 ## Recent Changes
+- 008-live-networth: Added Python 3.12 (backend), TypeScript 5.8.2 (frontend) + FastAPI 0.115.6, React 19.2.3, recharts 3.6.0, Vite 6.2.0, Tailwind CSS
 
 - 007-gemini-api-integration: Replaced Claude CLI with Gemini API for AI categorization
 - 006-date-range-presets: Added date range preset filters to transactions view
+
+## Active Technologies
+- Python 3.12 (backend), TypeScript 5.8.2 (frontend) + FastAPI 0.115.6, React 19.2.3, recharts 3.6.0, Vite 6.2.0, Tailwind CSS (008-live-networth)

@@ -192,16 +192,19 @@ class CategoryMappingService:
             for source_category, target_category_id in mappings:
                 mapping_id = str(uuid.uuid4())
 
-                # Use INSERT ... ON CONFLICT to handle duplicates
+                # Delete existing mapping if present, then insert
+                conn.execute(
+                    """
+                    DELETE FROM category_mappings
+                    WHERE account_id = ? AND source_category = ?
+                    """,
+                    [account_id, source_category],
+                )
                 conn.execute(
                     """
                     INSERT INTO category_mappings
                     (id, account_id, source_category, target_category_id, source)
                     VALUES (?, ?, ?, ?, ?)
-                    ON CONFLICT (account_id, source_category)
-                    DO UPDATE SET
-                        target_category_id = EXCLUDED.target_category_id,
-                        source = EXCLUDED.source
                     """,
                     [mapping_id, account_id, source_category, target_category_id, source],
                 )
