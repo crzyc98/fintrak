@@ -303,12 +303,34 @@ class TransactionService:
         if not updates:
             return existing
 
-        values.append(transaction_id)
-
+        # DuckDB has a known bug where UPDATE on tables with primary key
+        # indexes throws spurious "duplicate key" errors. Work around it
+        # with DELETE + INSERT.
         with get_db() as conn:
+            row = conn.execute(
+                """SELECT id, account_id, date, description, original_description,
+                          amount, category_id, reviewed, reviewed_at, notes,
+                          normalized_merchant, confidence_score, categorization_source,
+                          created_at
+                   FROM transactions WHERE id = ?""",
+                [transaction_id],
+            ).fetchone()
+
+            # Apply updates to a mutable copy
+            cols = ["id", "account_id", "date", "description", "original_description",
+                    "amount", "category_id", "reviewed", "reviewed_at", "notes",
+                    "normalized_merchant", "confidence_score", "categorization_source",
+                    "created_at"]
+            row_dict = dict(zip(cols, row))
+
+            for clause, val in zip(updates, values):
+                col_name = clause.split(" = ")[0].strip()
+                row_dict[col_name] = val
+
+            conn.execute("DELETE FROM transactions WHERE id = ?", [transaction_id])
             conn.execute(
-                f"UPDATE transactions SET {', '.join(updates)} WHERE id = ?",
-                values,
+                f"INSERT INTO transactions ({', '.join(cols)}) VALUES ({', '.join(['?'] * len(cols))})",
+                [row_dict[c] for c in cols],
             )
 
         # If category changed and transaction has normalized_merchant, create a rule

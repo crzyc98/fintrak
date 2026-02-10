@@ -39,6 +39,10 @@ DATE_FORMATS = {
     'DD-MM-YYYY': '%d-%m-%Y',
     'M/D/YYYY': '%m/%d/%Y',
     'D/M/YYYY': '%d/%m/%Y',
+    'M/D/YY': '%m/%d/%y',
+    'MM/DD/YY': '%m/%d/%y',
+    'DD/MM/YY': '%d/%m/%y',
+    'YY-MM-DD': '%y-%m-%d',
 }
 
 
@@ -72,7 +76,23 @@ class CsvImportService:
             ).fetchall()
         return {row[1].lower(): (row[0], row[1], row[2]) for row in result}
 
-    def _auto_detect_mapping(self, headers: list[str]) -> Optional[CsvColumnMapping]:
+    def _detect_date_format(self, date_samples: list[str]) -> str:
+        """Sniff date format from sample values. Returns best-matching DATE_FORMATS key."""
+        scores: dict[str, int] = {k: 0 for k in DATE_FORMATS}
+        for sample in date_samples:
+            sample = sample.strip()
+            if not sample:
+                continue
+            for fmt_name, fmt in DATE_FORMATS.items():
+                try:
+                    datetime.strptime(sample, fmt)
+                    scores[fmt_name] += 1
+                except ValueError:
+                    pass
+        best = max(scores, key=scores.get)  # type: ignore[arg-type]
+        return best if scores[best] > 0 else 'YYYY-MM-DD'
+
+    def _auto_detect_mapping(self, headers: list[str], data_rows: list[list[str]] | None = None) -> Optional[CsvColumnMapping]:
         date_col = None
         desc_col = None
         amount_col = None
@@ -99,6 +119,13 @@ class CsvImportService:
         if not date_col or not desc_col:
             return None
 
+        # Detect date format from sample data
+        detected_format = 'YYYY-MM-DD'
+        if data_rows and date_col:
+            date_col_idx = headers.index(date_col)
+            date_samples = [r[date_col_idx] for r in data_rows[:10] if date_col_idx < len(r)]
+            detected_format = self._detect_date_format(date_samples)
+
         # Prefer single amount column, fallback to debit/credit
         if amount_col:
             return CsvColumnMapping(
@@ -106,7 +133,7 @@ class CsvImportService:
                 description_column=desc_col,
                 amount_mode=AmountMode.SINGLE,
                 amount_column=amount_col,
-                date_format='YYYY-MM-DD',
+                date_format=detected_format,
                 category_column=category_col,
             )
         elif debit_col and credit_col:
@@ -116,7 +143,7 @@ class CsvImportService:
                 amount_mode=AmountMode.SPLIT,
                 debit_column=debit_col,
                 credit_column=credit_col,
-                date_format='YYYY-MM-DD',
+                date_format=detected_format,
                 category_column=category_col,
             )
 
@@ -139,7 +166,7 @@ class CsvImportService:
         data_rows = rows[1:]
 
         sample_rows = data_rows[:5]
-        suggested_mapping = self._auto_detect_mapping(headers)
+        suggested_mapping = self._auto_detect_mapping(headers, data_rows)
 
         return CsvPreviewResponse(
             headers=headers,
