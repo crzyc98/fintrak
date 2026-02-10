@@ -5,6 +5,7 @@ import NetWorth from './NetWorth';
 import TransactionReview from './TransactionReview';
 import TopCategories from './TopCategories';
 import UpcomingRecurrings from './UpcomingRecurrings';
+import SpendingInsights from './SpendingInsights';
 
 interface DashboardProps {
   setActiveTab?: (tab: string) => void;
@@ -27,6 +28,9 @@ const Dashboard: React.FC<DashboardProps> = ({ setActiveTab }) => {
         <TopCategories />
         <UpcomingRecurrings />
       </div>
+
+      {/* AI Spending Insights */}
+      <SpendingInsights />
     </div>
   );
 };
