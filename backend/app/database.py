@@ -150,6 +150,7 @@ def init_db():
             success_count INTEGER NOT NULL DEFAULT 0,
             failure_count INTEGER NOT NULL DEFAULT 0,
             rule_match_count INTEGER NOT NULL DEFAULT 0,
+            desc_rule_match_count INTEGER NOT NULL DEFAULT 0,
             ai_match_count INTEGER NOT NULL DEFAULT 0,
             skipped_count INTEGER NOT NULL DEFAULT 0,
             duration_ms INTEGER,
@@ -177,6 +178,30 @@ def init_db():
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_categorization_batches_started
         ON categorization_batches(started_at)
+    """)
+
+    # Description-based pattern rules for categorization fallback
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS description_pattern_rules (
+            id VARCHAR(36) PRIMARY KEY,
+            account_id VARCHAR(36) NOT NULL,
+            description_pattern VARCHAR(500) NOT NULL,
+            category_id VARCHAR(36) NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (account_id) REFERENCES accounts(id),
+            FOREIGN KEY (category_id) REFERENCES categories(id),
+            UNIQUE(account_id, description_pattern)
+        )
+    """)
+
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_desc_pattern_rules_account
+        ON description_pattern_rules(account_id)
+    """)
+
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_desc_pattern_rules_category
+        ON description_pattern_rules(category_id)
     """)
 
     # Category mapping table for AI-suggested CSV import mappings

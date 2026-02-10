@@ -94,7 +94,7 @@ class CategorizationService:
             if transaction_ids:
                 placeholders = ",".join(["?" for _ in transaction_ids])
                 query = f"""
-                    SELECT id, description, original_description, amount, normalized_merchant
+                    SELECT id, description, original_description, amount, normalized_merchant, account_id
                     FROM transactions
                     WHERE category_id IS NULL
                     AND id IN ({placeholders})
@@ -104,7 +104,7 @@ class CategorizationService:
                 params = transaction_ids + [limit]
             else:
                 query = """
-                    SELECT id, description, original_description, amount, normalized_merchant
+                    SELECT id, description, original_description, amount, normalized_merchant, account_id
                     FROM transactions
                     WHERE category_id IS NULL
                     ORDER BY date DESC
@@ -121,6 +121,7 @@ class CategorizationService:
                 "original_description": row[2],
                 "amount": row[3],
                 "normalized_merchant": row[4],
+                "account_id": row[5],
             }
             for row in result
         ]
@@ -339,6 +340,7 @@ Only respond with the JSON array, no additional text."""
         success_count = 0
         failure_count = 0
         rule_match_count = 0
+        desc_rule_match_count = 0
         ai_match_count = 0
         skipped_count = 0
         error_message = None
@@ -356,7 +358,7 @@ Only respond with the JSON array, no additional text."""
                     extra={"event": "categorization_empty"}
                 )
                 return self._create_batch_response(
-                    str(uuid.uuid4()), started_at, 0, 0, 0, 0, 0, 0, None
+                    str(uuid.uuid4()), started_at, 0, 0, 0, 0, 0, 0, 0, None
                 )
 
             # Create batch record in database
@@ -383,11 +385,11 @@ Only respond with the JSON array, no additional text."""
                 )
                 error_message = "No categories available"
                 batch_service.complete_batch(
-                    batch_id, 0, total_count, 0, 0, 0, error_message
+                    batch_id, 0, total_count, 0, 0, 0, 0, error_message
                 )
                 return self._create_batch_response(
                     batch_id, started_at, total_count, 0, total_count,
-                    0, 0, 0, error_message
+                    0, 0, 0, 0, error_message
                 )
 
             # Apply rules first (unless force_ai is set)
@@ -395,16 +397,18 @@ Only respond with the JSON array, no additional text."""
             remaining_transactions = transactions
 
             if not force_ai:
-                remaining_transactions, rule_matches = self._apply_rules(transactions)
+                remaining_transactions, rule_matches, desc_rule_matches = self._apply_rules(transactions)
                 rule_match_count = rule_matches
-                success_count += rule_matches
+                desc_rule_match_count = desc_rule_matches
+                success_count += rule_matches + desc_rule_matches
                 logger.info(
-                    f"[CATEGORIZATION] Rule matching complete: {rule_matches} matched, "
-                    f"{len(remaining_transactions)} remaining",
+                    f"[CATEGORIZATION] Rule matching complete: {rule_matches} merchant rules, "
+                    f"{desc_rule_matches} desc rules, {len(remaining_transactions)} remaining",
                     extra={
                         "event": "categorization_rules_applied",
                         "batch_id": batch_id,
                         "rule_match_count": rule_matches,
+                        "desc_rule_match_count": desc_rule_matches,
                         "remaining_count": len(remaining_transactions),
                     }
                 )
@@ -459,6 +463,7 @@ Only respond with the JSON array, no additional text."""
                 success_count,
                 failure_count,
                 rule_match_count,
+                desc_rule_match_count,
                 ai_match_count,
                 skipped_count,
                 error_message,
@@ -471,6 +476,7 @@ Only respond with the JSON array, no additional text."""
             success_count,
             failure_count,
             rule_match_count,
+            desc_rule_match_count,
             ai_match_count,
             skipped_count,
             error_message,
@@ -479,14 +485,15 @@ Only respond with the JSON array, no additional text."""
     def _apply_rules(
         self,
         transactions: list[dict],
-    ) -> tuple[list[dict], int]:
+    ) -> tuple[list[dict], int, int]:
         """
         Apply learned rules to transactions.
 
         Returns:
-            Tuple of (remaining_transactions, match_count)
+            Tuple of (remaining_transactions, merchant_rule_match_count, desc_rule_match_count)
         """
         from app.services.rule_service import rule_service
+        from app.services.desc_rule_service import desc_rule_service
 
         remaining = []
         match_count = 0
@@ -494,11 +501,11 @@ Only respond with the JSON array, no additional text."""
         for tx in transactions:
             normalized_merchant = tx.get("normalized_merchant")
             if not normalized_merchant:
-                # No normalized merchant, can't match rules
+                # No normalized merchant, can't match merchant rules
                 remaining.append(tx)
                 continue
 
-            # Find matching rule
+            # Find matching merchant rule
             rule = rule_service.find_matching_rule(normalized_merchant)
             if rule:
                 # Apply rule directly
@@ -514,10 +521,37 @@ Only respond with the JSON array, no additional text."""
                     f"for transaction {tx['id']}"
                 )
             else:
-                # No rule match, send to AI
+                # No merchant rule match
                 remaining.append(tx)
 
-        return remaining, match_count
+        # Second pass: apply description-based pattern rules as fallback
+        desc_remaining = []
+        desc_match_count = 0
+
+        for tx in remaining:
+            description = tx.get("description", "")
+            account_id = tx.get("account_id", "")
+
+            if description and account_id:
+                desc_rule = desc_rule_service.find_matching_rule(description, account_id)
+                if desc_rule:
+                    result = CategorizationResult(
+                        transaction_id=tx["id"],
+                        category_id=desc_rule.category_id,
+                        confidence=1.0,
+                    )
+                    self.apply_categorization_results([result], source="desc_rule")
+                    desc_match_count += 1
+                    logger.debug(
+                        f"Desc rule matched: '{desc_rule.description_pattern}' -> "
+                        f"{desc_rule.category_id} for transaction {tx['id']}"
+                    )
+                else:
+                    desc_remaining.append(tx)
+            else:
+                desc_remaining.append(tx)
+
+        return desc_remaining, match_count, desc_match_count
 
     def _process_ai_batches(
         self,
@@ -598,6 +632,7 @@ Only respond with the JSON array, no additional text."""
         success_count: int,
         failure_count: int,
         rule_match_count: int,
+        desc_rule_match_count: int,
         ai_match_count: int,
         skipped_count: int,
         error_message: Optional[str],
@@ -608,8 +643,8 @@ Only respond with the JSON array, no additional text."""
 
         logger.info(
             f"Categorization complete: {success_count}/{transaction_count} successful "
-            f"(rules: {rule_match_count}, AI: {ai_match_count}, skipped: {skipped_count}) "
-            f"in {duration_ms}ms"
+            f"(merchant rules: {rule_match_count}, desc rules: {desc_rule_match_count}, "
+            f"AI: {ai_match_count}, skipped: {skipped_count}) in {duration_ms}ms"
         )
 
         return CategorizationBatchResponse(
@@ -618,6 +653,7 @@ Only respond with the JSON array, no additional text."""
             success_count=success_count,
             failure_count=failure_count,
             rule_match_count=rule_match_count,
+            desc_rule_match_count=desc_rule_match_count,
             ai_match_count=ai_match_count,
             skipped_count=skipped_count,
             duration_ms=duration_ms,

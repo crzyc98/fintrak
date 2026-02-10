@@ -84,11 +84,11 @@ The app uses Google Gemini API for transaction categorization:
 - Retry logic: Exponential backoff (2s, 4s, 8s delays)
 
 ## Recent Changes
+- 010-description-pattern-rules: Added Python 3.12 (backend), TypeScript 5.8.2 (frontend) + FastAPI 0.115.6, React 19.2.3, DuckDB 1.1.3, Pydantic 2.10.4
 - 009-ai-spending-insights: Added Python 3.12 (backend), TypeScript 5.8.2 (frontend) + FastAPI 0.115.6, React 19.2.3, google-genai (Gemini), DuckDB 1.1.3, Pydantic 2.10.4
 - 008-live-networth: Added Python 3.12 (backend), TypeScript 5.8.2 (frontend) + FastAPI 0.115.6, React 19.2.3, recharts 3.6.0, Vite 6.2.0, Tailwind CSS
 
-- 007-gemini-api-integration: Replaced Claude CLI with Gemini API for AI categorization
 
 ## Active Technologies
-- Python 3.12 (backend), TypeScript 5.8.2 (frontend) + FastAPI 0.115.6, React 19.2.3, google-genai (Gemini), DuckDB 1.1.3, Pydantic 2.10.4 (009-ai-spending-insights)
-- DuckDB (existing — no new tables; insights are ephemeral) (009-ai-spending-insights)
+- Python 3.12 (backend), TypeScript 5.8.2 (frontend) + FastAPI 0.115.6, React 19.2.3, DuckDB 1.1.3, Pydantic 2.10.4 (010-description-pattern-rules)
+- DuckDB (file-based: `fintrak.duckdb`) — new `description_pattern_rules` table (010-description-pattern-rules)
