@@ -643,6 +643,82 @@ export async function categorizeTransactions(
   });
 }
 
+// Insights API
+export interface InsightRequest {
+  period: 'current_month' | 'last_month' | 'last_3_months' | 'custom';
+  type: 'summary' | 'report';
+  date_from?: string;
+  date_to?: string;
+}
+
+export interface CategorySpending {
+  category_id: string;
+  category_name: string;
+  category_emoji: string | null;
+  total_amount_cents: number;
+  transaction_count: number;
+  previous_period_amount_cents: number | null;
+  change_percentage: number | null;
+}
+
+export interface Anomaly {
+  transaction_id: string;
+  transaction_date: string;
+  description: string;
+  merchant: string | null;
+  amount_cents: number;
+  category_name: string;
+  category_avg_cents: number;
+  deviation_factor: number;
+}
+
+export interface InsightResponse {
+  period_start: string;
+  period_end: string;
+  total_spending_cents: number;
+  total_transactions: number;
+  uncategorized_count: number;
+  summary: string | null;
+  top_categories: CategorySpending[];
+  anomalies: Anomaly[];
+  anomaly_explanations: string | null;
+  suggestions: string[];
+  generated_at: string;
+  insufficient_data?: boolean;
+  insufficient_data_message?: string;
+}
+
+export async function generateInsights(
+  request: InsightRequest
+): Promise<InsightResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/insights/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    if (response.status === 429) {
+      const retryAfter = error.retry_after_seconds;
+      throw new Error(
+        retryAfter
+          ? `Please wait ${retryAfter} seconds before generating new insights.`
+          : 'Please wait before generating new insights.'
+      );
+    }
+    if (response.status === 503) {
+      throw new Error(
+        error.detail || 'AI service is temporarily unavailable. Please try again in a few minutes.'
+      );
+    }
+    const message = typeof error.detail === 'string' ? error.detail : `HTTP ${response.status}`;
+    throw new Error(message);
+  }
+
+  return response.json();
+}
+
 // Monthly Spending API
 export interface SpendingDataPoint {
   day: number;

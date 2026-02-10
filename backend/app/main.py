@@ -1,10 +1,13 @@
 import logging
 import time
+from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
+load_dotenv()  # loads .env from cwd; in Docker, use real env vars instead
+
 from app.database import init_db, close_connection
-from app.routers import accounts, categories, transactions, categorization, csv_import
+from app.routers import accounts, categories, transactions, categorization, csv_import, insights
 
 logging.basicConfig(
     level=logging.INFO,
@@ -57,6 +60,7 @@ app.include_router(categories.router)
 app.include_router(transactions.router)
 app.include_router(categorization.router)
 app.include_router(csv_import.router)
+app.include_router(insights.router)
 
 
 @app.get("/api/health")
