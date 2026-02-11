@@ -208,11 +208,12 @@ const ReviewPage: React.FC<ReviewPageProps> = ({ onNavigateToDashboard }) => {
 
       if (result.success_count > 0) {
         setAiResult(
-          `Categorized ${result.success_count} transaction${result.success_count !== 1 ? 's' : ''} ` +
+          `Classified ${result.success_count} transaction${result.success_count !== 1 ? 's' : ''} ` +
           `(${result.rule_match_count} by rules, ${result.ai_match_count} by AI)`
         );
-        // Reload the queue to reflect changes
+        // Reload the queue and categories to reflect changes (AI may create new categories)
         await loadQueue();
+        await loadCategories();
       } else if (result.transaction_count === 0) {
         setAiResult('No uncategorized transactions to process');
       } else {

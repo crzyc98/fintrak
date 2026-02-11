@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Optional
 
 from app.config import CATEGORIZATION_BATCH_SIZE
-from app.database import get_db
+from app.database import get_db, safe_update_transaction
 from app.models.enrichment import (
     EnrichmentTriggerRequest,
     EnrichmentResult,
@@ -179,23 +179,16 @@ Only respond with the JSON array, no additional text."""
         with get_db() as conn:
             for result in results:
                 try:
-                    conn.execute(
-                        """
-                        UPDATE transactions
-                        SET normalized_merchant = COALESCE(?, normalized_merchant),
-                            subcategory = ?,
-                            is_discretionary = ?,
-                            enrichment_source = 'ai'
-                        WHERE id = ?
-                        """,
-                        [
-                            result.normalized_merchant,
-                            result.subcategory,
-                            result.is_discretionary,
-                            result.transaction_id,
-                        ],
-                    )
-                    success_count += 1
+                    updates = {
+                        "subcategory": result.subcategory,
+                        "is_discretionary": result.is_discretionary,
+                        "enrichment_source": "ai",
+                    }
+                    if result.normalized_merchant is not None:
+                        updates["normalized_merchant"] = result.normalized_merchant
+
+                    if safe_update_transaction(conn, result.transaction_id, updates):
+                        success_count += 1
                 except Exception as e:
                     logger.warning(
                         f"Failed to apply enrichment for {result.transaction_id}: {e}"

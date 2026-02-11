@@ -8,6 +8,16 @@ DATABASE_PATH = os.getenv("DATABASE_PATH", "fintrak.duckdb")
 _connection = None
 logger = logging.getLogger(__name__)
 
+# Canonical column list for the transactions table.
+# Used by safe_update_transaction() to SELECT/INSERT full rows.
+TRANSACTION_COLUMNS = [
+    "id", "account_id", "date", "description", "original_description",
+    "amount", "category_id", "reviewed", "reviewed_at", "notes",
+    "normalized_merchant", "confidence_score", "categorization_source",
+    "subcategory", "is_discretionary", "enrichment_source",
+    "created_at",
+]
+
 
 def get_connection() -> duckdb.DuckDBPyConnection:
     global _connection
@@ -48,6 +58,45 @@ def close_connection():
             except Exception as e:
                 logger.warning(f"Error closing connection: {e}")
             _connection = None
+
+
+def safe_update_transaction(conn, transaction_id: str, updates: dict) -> bool:
+    """
+    Safely update a transaction row using DELETE+INSERT to work around a
+    DuckDB ART index limitation.
+
+    DuckDB implements UPDATE as DELETE+INSERT internally.  On tables with
+    multiple ART indexes (transactions has 7), this can trigger spurious
+    "Duplicate key violates primary key constraint" errors.  The explicit
+    DELETE followed by INSERT avoids the issue.
+
+    Args:
+        conn: Active DuckDB connection.
+        transaction_id: The UUID of the transaction to update.
+        updates: Dict mapping column names to new values.
+
+    Returns:
+        True if the row was updated, False if the transaction was not found.
+    """
+    cols_csv = ", ".join(TRANSACTION_COLUMNS)
+    row = conn.execute(
+        f"SELECT {cols_csv} FROM transactions WHERE id = ?",
+        [transaction_id],
+    ).fetchone()
+
+    if row is None:
+        return False
+
+    row_dict = dict(zip(TRANSACTION_COLUMNS, row))
+    row_dict.update(updates)
+
+    conn.execute("DELETE FROM transactions WHERE id = ?", [transaction_id])
+    conn.execute(
+        f"INSERT INTO transactions ({cols_csv}) "
+        f"VALUES ({', '.join(['?'] * len(TRANSACTION_COLUMNS))})",
+        [row_dict[c] for c in TRANSACTION_COLUMNS],
+    )
+    return True
 
 
 def init_db():
@@ -159,6 +208,12 @@ def init_db():
             completed_at TIMESTAMP
         )
     """)
+
+    # Migration: Add desc_rule_match_count column if it doesn't exist (for existing databases)
+    try:
+        conn.execute("SELECT desc_rule_match_count FROM categorization_batches LIMIT 1")
+    except duckdb.BinderException:
+        conn.execute("ALTER TABLE categorization_batches ADD COLUMN desc_rule_match_count INTEGER DEFAULT 0")
 
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_transactions_normalized_merchant
