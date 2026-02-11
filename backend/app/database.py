@@ -223,3 +223,19 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_category_mappings_account
         ON category_mappings(account_id)
     """)
+
+    # Enrichment feature: add columns for AI-powered transaction enrichment
+    for col, col_type in [
+        ("subcategory", "VARCHAR(100)"),
+        ("is_discretionary", "BOOLEAN"),
+        ("enrichment_source", "VARCHAR(10)"),
+    ]:
+        try:
+            conn.execute(f"SELECT {col} FROM transactions LIMIT 1")
+        except duckdb.BinderException:
+            conn.execute(f"ALTER TABLE transactions ADD COLUMN {col} {col_type}")
+
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_transactions_enrichment_source
+        ON transactions(enrichment_source)
+    """)

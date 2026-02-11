@@ -286,6 +286,7 @@ def _execute_merchant_keyword_search(
         SELECT t.id, t.account_id, t.date, t.description, t.original_description,
                t.amount, t.category_id, t.reviewed, t.reviewed_at, t.notes, t.created_at,
                t.normalized_merchant, t.confidence_score, t.categorization_source,
+               t.subcategory, t.is_discretionary, t.enrichment_source,
                a.name as account_name,
                c.name as category_name, c.emoji as category_emoji
         FROM transactions t
@@ -307,8 +308,9 @@ def _execute_merchant_keyword_search(
             original_description=row[4], amount=row[5], category_id=row[6],
             reviewed=row[7], reviewed_at=row[8], notes=row[9], created_at=row[10],
             normalized_merchant=row[11], confidence_score=row[12],
-            categorization_source=row[13], account_name=row[14],
-            category_name=row[15], category_emoji=row[16],
+            categorization_source=row[13], subcategory=row[14],
+            is_discretionary=row[15], enrichment_source=row[16],
+            account_name=row[17], category_name=row[18], category_emoji=row[19],
         )
         for row in rows
     ]

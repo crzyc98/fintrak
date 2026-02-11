@@ -150,6 +150,11 @@ export interface Transaction {
   confidence_score?: number | null;
   categorization_source?: 'rule' | 'ai' | 'manual' | 'none' | null;
 
+  // Enrichment fields
+  subcategory?: string | null;
+  is_discretionary?: boolean | null;
+  enrichment_source?: 'ai' | 'manual' | null;
+
   // Joined fields
   account_name?: string;
   category_name?: string;

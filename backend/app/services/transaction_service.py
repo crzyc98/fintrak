@@ -122,6 +122,7 @@ class TransactionService:
             SELECT t.id, t.account_id, t.date, t.description, t.original_description,
                    t.amount, t.category_id, t.reviewed, t.reviewed_at, t.notes, t.created_at,
                    t.normalized_merchant, t.confidence_score, t.categorization_source,
+                   t.subcategory, t.is_discretionary, t.enrichment_source,
                    a.name as account_name,
                    c.name as category_name, c.emoji as category_emoji
             FROM transactions t
@@ -152,9 +153,12 @@ class TransactionService:
                 normalized_merchant=row[11],
                 confidence_score=row[12],
                 categorization_source=row[13],
-                account_name=row[14],
-                category_name=row[15],
-                category_emoji=row[16],
+                subcategory=row[14],
+                is_discretionary=row[15],
+                enrichment_source=row[16],
+                account_name=row[17],
+                category_name=row[18],
+                category_emoji=row[19],
             )
             for row in result
         ]
@@ -221,6 +225,7 @@ class TransactionService:
                 SELECT t.id, t.account_id, t.date, t.description, t.original_description,
                        t.amount, t.category_id, t.reviewed, t.reviewed_at, t.notes, t.created_at,
                        t.normalized_merchant, t.confidence_score, t.categorization_source,
+                       t.subcategory, t.is_discretionary, t.enrichment_source,
                        a.name as account_name,
                        c.name as category_name, c.emoji as category_emoji
                 FROM transactions t
@@ -249,9 +254,12 @@ class TransactionService:
             normalized_merchant=result[11],
             confidence_score=result[12],
             categorization_source=result[13],
-            account_name=result[14],
-            category_name=result[15],
-            category_emoji=result[16],
+            subcategory=result[14],
+            is_discretionary=result[15],
+            enrichment_source=result[16],
+            account_name=result[17],
+            category_name=result[18],
+            category_emoji=result[19],
         )
 
     def update(
@@ -311,6 +319,7 @@ class TransactionService:
                 """SELECT id, account_id, date, description, original_description,
                           amount, category_id, reviewed, reviewed_at, notes,
                           normalized_merchant, confidence_score, categorization_source,
+                          subcategory, is_discretionary, enrichment_source,
                           created_at
                    FROM transactions WHERE id = ?""",
                 [transaction_id],
@@ -320,6 +329,7 @@ class TransactionService:
             cols = ["id", "account_id", "date", "description", "original_description",
                     "amount", "category_id", "reviewed", "reviewed_at", "notes",
                     "normalized_merchant", "confidence_score", "categorization_source",
+                    "subcategory", "is_discretionary", "enrichment_source",
                     "created_at"]
             row_dict = dict(zip(cols, row))
 

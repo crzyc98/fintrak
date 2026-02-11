@@ -45,6 +45,11 @@ class TransactionResponse(BaseModel):
     confidence_score: Optional[float] = None
     categorization_source: Optional[str] = None  # 'rule', 'ai', 'manual', 'none'
 
+    # Enrichment fields
+    subcategory: Optional[str] = None
+    is_discretionary: Optional[bool] = None
+    enrichment_source: Optional[str] = None  # 'ai', 'manual'
+
     # Joined fields (optional, populated when needed)
     account_name: Optional[str] = None
     category_name: Optional[str] = None

@@ -176,6 +176,10 @@ export interface TransactionData {
   normalized_merchant?: string | null;
   confidence_score?: number | null;
   categorization_source?: 'rule' | 'desc_rule' | 'ai' | 'manual' | 'none' | null;
+  // Enrichment fields
+  subcategory?: string | null;
+  is_discretionary?: boolean | null;
+  enrichment_source?: 'ai' | 'manual' | null;
   // Joined fields
   account_name?: string;
   category_name?: string;
@@ -829,4 +833,28 @@ export interface MonthlySpendingData {
 
 export async function fetchMonthlySpending(): Promise<MonthlySpendingData> {
   return fetchApi<MonthlySpendingData>('/api/transactions/spending/monthly');
+}
+
+// Enrichment API
+export interface EnrichmentTriggerRequestData {
+  transaction_ids?: string[];
+  limit?: number;
+}
+
+export interface EnrichmentBatchResponseData {
+  total_count: number;
+  success_count: number;
+  failure_count: number;
+  skipped_count: number;
+  duration_ms: number;
+  error_message: string | null;
+}
+
+export async function triggerEnrichment(
+  request?: EnrichmentTriggerRequestData
+): Promise<EnrichmentBatchResponseData> {
+  return fetchApi<EnrichmentBatchResponseData>('/api/enrichment/trigger', {
+    method: 'POST',
+    body: request ? JSON.stringify(request) : undefined,
+  });
 }

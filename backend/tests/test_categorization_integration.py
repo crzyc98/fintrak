@@ -45,6 +45,9 @@ def setup_db(tmp_path, monkeypatch):
                 normalized_merchant VARCHAR(255),
                 confidence_score DECIMAL(3,2),
                 categorization_source VARCHAR(10),
+                subcategory VARCHAR(100),
+                is_discretionary BOOLEAN,
+                enrichment_source VARCHAR(10),
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
         """)

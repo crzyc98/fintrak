@@ -7,6 +7,7 @@ import {
   fetchAccounts,
   fetchCategories,
   triggerCategorization,
+  triggerEnrichment,
   nlSearch,
   TransactionData,
   TransactionFiltersData,
@@ -104,6 +105,7 @@ const TransactionsView: React.FC = () => {
   // Selection state
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isCategorizing, setIsCategorizing] = useState(false);
+  const [isEnriching, setIsEnriching] = useState(false);
 
   // Date preset state
   const [activePreset, setActivePreset] = useState<string | null>(null);
@@ -413,6 +415,31 @@ const TransactionsView: React.FC = () => {
       setError(err instanceof Error ? err.message : 'Failed to categorize transactions');
     } finally {
       setIsCategorizing(false);
+    }
+  };
+
+  // AI Enrichment handler
+  const handleAIEnrich = async () => {
+    if (selectedIds.size === 0) return;
+
+    try {
+      setIsEnriching(true);
+      setError(null);
+
+      const result = await triggerEnrichment({
+        transaction_ids: Array.from(selectedIds),
+      });
+
+      await loadTransactions();
+      clearSelection();
+
+      if (result.success_count > 0) {
+        console.log(`Enriched ${result.success_count} transaction(s)`);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to enrich transactions');
+    } finally {
+      setIsEnriching(false);
     }
   };
 
@@ -784,6 +811,28 @@ const TransactionsView: React.FC = () => {
                 </>
               )}
             </button>
+            <button
+              onClick={handleAIEnrich}
+              disabled={isEnriching}
+              className="flex items-center space-x-2 px-4 py-2 text-sm font-semibold text-white bg-teal-600 hover:bg-teal-500 disabled:bg-teal-600/50 disabled:cursor-not-allowed rounded-xl transition-colors"
+            >
+              {isEnriching ? (
+                <>
+                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                  <span>Enriching...</span>
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                  </svg>
+                  <span>AI Enrich</span>
+                </>
+              )}
+            </button>
           </div>
         </div>
       )}
@@ -977,14 +1026,32 @@ const TransactionsView: React.FC = () => {
 
                   {/* Description */}
                   <td className="py-3 px-4">
-                    <div className="text-sm font-medium text-white truncate max-w-xs">
-                      {transaction.normalized_merchant || transaction.description}
-                    </div>
-                    {(transaction.normalized_merchant || transaction.description) !== transaction.original_description && (
-                      <div className="text-xs text-gray-600 truncate max-w-xs" title={transaction.original_description}>
-                        {transaction.original_description}
+                    <div className="flex items-center gap-2">
+                      <div className="text-sm font-medium text-white truncate max-w-xs">
+                        {transaction.normalized_merchant || transaction.description}
                       </div>
-                    )}
+                      {transaction.is_discretionary !== null && transaction.is_discretionary !== undefined && (
+                        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium whitespace-nowrap ${
+                          transaction.is_discretionary
+                            ? 'bg-orange-500/20 text-orange-400'
+                            : 'bg-blue-500/20 text-blue-400'
+                        }`}>
+                          {transaction.is_discretionary ? 'Discretionary' : 'Essential'}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {(transaction.normalized_merchant || transaction.description) !== transaction.original_description && (
+                        <div className="text-xs text-gray-600 truncate max-w-xs" title={transaction.original_description}>
+                          {transaction.original_description}
+                        </div>
+                      )}
+                      {transaction.subcategory && (
+                        <span className="text-[10px] text-gray-500 bg-white/5 px-1.5 py-0.5 rounded whitespace-nowrap">
+                          {transaction.subcategory}
+                        </span>
+                      )}
+                    </div>
                   </td>
 
                   {/* Category */}
