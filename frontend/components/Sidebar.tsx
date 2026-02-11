@@ -226,7 +226,10 @@ const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
           <button className="flex items-center text-xs font-semibold text-gray-500 hover:text-white transition-colors">
             <span className="mr-3">💬</span> Get help
           </button>
-          <button className="flex items-center text-xs font-semibold text-gray-500 hover:text-white transition-colors">
+          <button
+            onClick={() => setActiveTab('Settings')}
+            className="flex items-center text-xs font-semibold text-gray-500 hover:text-white transition-colors"
+          >
             <span className="mr-3">⚙️</span> Settings
           </button>
         </div>

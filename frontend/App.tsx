@@ -9,6 +9,7 @@ import CategoriesView from './components/CategoriesView';
 import RecurringsView from './components/RecurringsView';
 import ReviewPage from './components/ReviewPage';
 import CreditSpendingView from './components/CreditSpendingView';
+import SettingsView from './components/SettingsView';
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState('Dashboard');
@@ -64,7 +65,8 @@ const App: React.FC = () => {
           {activeTab === 'Recurrings' && <RecurringsView />}
           {activeTab === 'Review' && <ReviewPage onNavigateToDashboard={() => setActiveTab('Dashboard')} />}
           {activeTab === 'Credit Spending' && <CreditSpendingView />}
-          {activeTab !== 'Dashboard' && activeTab !== 'Transactions' && activeTab !== 'Accounts' && activeTab !== 'Investments' && activeTab !== 'Categories' && activeTab !== 'Recurrings' && activeTab !== 'Review' && activeTab !== 'Credit Spending' && (
+          {activeTab === 'Settings' && <SettingsView />}
+          {activeTab !== 'Dashboard' && activeTab !== 'Transactions' && activeTab !== 'Accounts' && activeTab !== 'Investments' && activeTab !== 'Categories' && activeTab !== 'Recurrings' && activeTab !== 'Review' && activeTab !== 'Credit Spending' && activeTab !== 'Settings' && (
             <div className="flex flex-col items-center justify-center h-[50vh] text-center">
               <h3 className="text-lg font-bold text-white mb-2">{activeTab} coming soon</h3>
             </div>

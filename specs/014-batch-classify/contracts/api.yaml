@@ -1,0 +1,180 @@
+openapi: "3.0.3"
+info:
+  title: Batch Classification API Extensions
+  version: "1.0.0"
+  description: >
+    New and modified endpoints for the batch AI classification feature.
+    All endpoints extend the existing /api/categorization prefix.
+
+paths:
+  /api/categorization/trigger:
+    post:
+      summary: Trigger categorization (extended)
+      description: >
+        Existing endpoint, extended with optional batch_size parameter.
+        When called without transaction_ids, processes ALL unclassified transactions.
+        Returns immediately with batch_id; processing continues in background.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CategorizationTriggerRequest"
+      responses:
+        "202":
+          description: Batch job accepted and started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatchTriggerResponse"
+        "409":
+          description: A batch classification job is already running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Validation error (e.g., invalid batch_size)
+
+  /api/categorization/unclassified-count:
+    get:
+      summary: Get count of unclassified transactions
+      description: >
+        Returns the number of transactions that need classification
+        (no category assigned or missing enrichment data).
+      responses:
+        "200":
+          description: Count of unclassified transactions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnclassifiedCountResponse"
+
+  /api/categorization/batches/{batch_id}/progress:
+    get:
+      summary: Get batch job progress
+      description: >
+        Returns real-time progress of a running (or completed/failed) batch job.
+        Frontend polls this endpoint every 2 seconds during batch processing.
+      parameters:
+        - name: batch_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Current batch progress
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatchProgressResponse"
+        "404":
+          description: Batch not found or no progress tracked (e.g., older batch)
+
+components:
+  schemas:
+    CategorizationTriggerRequest:
+      type: object
+      properties:
+        transaction_ids:
+          type: array
+          items:
+            type: string
+          nullable: true
+          description: Specific transaction IDs to classify. If null, processes all unclassified.
+        force_ai:
+          type: boolean
+          default: false
+          description: Skip rule matching and go directly to AI.
+        batch_size:
+          type: integer
+          minimum: 10
+          maximum: 200
+          nullable: true
+          description: >
+            Transactions per AI request. Overrides CATEGORIZATION_BATCH_SIZE env var.
+            If null, uses the environment default (50).
+
+    BatchTriggerResponse:
+      type: object
+      required: [batch_id, total_transactions, status]
+      properties:
+        batch_id:
+          type: string
+          format: uuid
+          description: ID of the created batch job. Use to poll progress.
+        total_transactions:
+          type: integer
+          description: Total number of unclassified transactions to process.
+        status:
+          type: string
+          enum: [running, completed]
+          description: >
+            "running" if processing in background, "completed" if finished
+            synchronously (e.g., 0 transactions or all matched by rules).
+
+    UnclassifiedCountResponse:
+      type: object
+      required: [count]
+      properties:
+        count:
+          type: integer
+          description: Number of transactions needing classification.
+
+    BatchProgressResponse:
+      type: object
+      required:
+        - batch_id
+        - status
+        - total_transactions
+        - processed_transactions
+        - success_count
+        - failure_count
+        - skipped_count
+        - rule_match_count
+        - desc_rule_match_count
+        - ai_match_count
+        - started_at
+      properties:
+        batch_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [running, completed, failed]
+        total_transactions:
+          type: integer
+        processed_transactions:
+          type: integer
+          description: Number of transactions processed so far.
+        success_count:
+          type: integer
+        failure_count:
+          type: integer
+        skipped_count:
+          type: integer
+        rule_match_count:
+          type: integer
+        desc_rule_match_count:
+          type: integer
+        ai_match_count:
+          type: integer
+        error_message:
+          type: string
+          nullable: true
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    ErrorResponse:
+      type: object
+      required: [detail]
+      properties:
+        detail:
+          type: string
