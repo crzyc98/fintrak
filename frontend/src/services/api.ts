@@ -274,6 +274,7 @@ export interface CategorizationBatchResponseData {
   desc_rule_match_count: number;
   ai_match_count: number;
   skipped_count: number;
+  categories_created_count: number;
   duration_ms: number | null;
   error_message: string | null;
   started_at: string;

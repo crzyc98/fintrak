@@ -3,7 +3,7 @@ import logging
 from datetime import date, datetime, timedelta
 from typing import Optional
 
-from app.database import get_db
+from app.database import get_db, safe_update_transaction
 from app.models.transaction import TransactionResponse
 from app.models.review import (
     BulkOperationRequest,
@@ -154,16 +154,11 @@ class ReviewService:
                 # Validate all transaction IDs exist
                 self._validate_transaction_ids(conn, transaction_ids)
 
-                # Update transactions
-                placeholders = ", ".join(["?" for _ in transaction_ids])
-                conn.execute(
-                    f"""
-                    UPDATE transactions
-                    SET reviewed = true, reviewed_at = ?
-                    WHERE id IN ({placeholders})
-                    """,
-                    [reviewed_at] + transaction_ids,
-                )
+                for tx_id in transaction_ids:
+                    safe_update_transaction(conn, tx_id, {
+                        "reviewed": True,
+                        "reviewed_at": reviewed_at,
+                    })
 
                 conn.execute("COMMIT")
 
@@ -202,16 +197,11 @@ class ReviewService:
                 # Validate all transaction IDs exist
                 self._validate_transaction_ids(conn, transaction_ids)
 
-                # Update transactions
-                placeholders = ", ".join(["?" for _ in transaction_ids])
-                conn.execute(
-                    f"""
-                    UPDATE transactions
-                    SET category_id = ?, categorization_source = 'manual'
-                    WHERE id IN ({placeholders})
-                    """,
-                    [category_id] + transaction_ids,
-                )
+                for tx_id in transaction_ids:
+                    safe_update_transaction(conn, tx_id, {
+                        "category_id": category_id,
+                        "categorization_source": "manual",
+                    })
 
                 conn.execute("COMMIT")
 
@@ -249,20 +239,17 @@ class ReviewService:
                 # Validate all transaction IDs exist
                 self._validate_transaction_ids(conn, transaction_ids)
 
-                # Update transactions - append note with newline separator
-                placeholders = ", ".join(["?" for _ in transaction_ids])
-                conn.execute(
-                    f"""
-                    UPDATE transactions
-                    SET notes = CASE
-                        WHEN notes IS NOT NULL AND notes != ''
-                        THEN notes || '\n' || ?
-                        ELSE ?
-                    END
-                    WHERE id IN ({placeholders})
-                    """,
-                    [note, note] + transaction_ids,
-                )
+                # Append note per-row using safe DELETE+INSERT
+                for tx_id in transaction_ids:
+                    row = conn.execute(
+                        "SELECT notes FROM transactions WHERE id = ?", [tx_id]
+                    ).fetchone()
+                    existing_notes = row[0] if row and row[0] else ""
+                    if existing_notes:
+                        new_notes = existing_notes + "\n" + note
+                    else:
+                        new_notes = note
+                    safe_update_transaction(conn, tx_id, {"notes": new_notes})
 
                 conn.execute("COMMIT")
 

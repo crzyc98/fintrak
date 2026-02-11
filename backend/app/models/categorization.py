@@ -83,6 +83,7 @@ class CategorizationBatchResponse(BaseModel):
     desc_rule_match_count: int = 0
     ai_match_count: int
     skipped_count: int
+    categories_created_count: int = 0
     duration_ms: Optional[int] = None
     error_message: Optional[str] = None
     started_at: datetime
@@ -109,6 +110,19 @@ class CategorizationResult(BaseModel):
     transaction_id: str
     category_id: str
     confidence: float = Field(..., ge=0.0, le=1.0)
+
+
+class UnifiedAIResult(BaseModel):
+    """Result from unified AI classification for a single transaction.
+    AI returns category_name (string) instead of category_id (UUID) because
+    it needs to be able to suggest new category names that don't exist yet."""
+    transaction_id: str
+    category_name: str
+    category_group: str = "Other"
+    subcategory: Optional[str] = None
+    is_discretionary: Optional[bool] = None
+    normalized_merchant: Optional[str] = None
+    confidence: float = Field(0.0, ge=0.0, le=1.0)
 
 
 # ============================================================================

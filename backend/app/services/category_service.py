@@ -1,3 +1,4 @@
+import re
 import uuid
 from typing import Optional
 from datetime import datetime
@@ -185,6 +186,51 @@ class CategoryService:
             conn.execute("DELETE FROM categories WHERE id = ?", [category_id])
 
         return True, None
+
+    @staticmethod
+    def _normalize_category_name(name: str) -> str:
+        """Normalize a category name for fuzzy matching."""
+        s = name.strip().lower()
+        # Normalize whitespace
+        s = re.sub(r"\s+", " ", s)
+        # Normalize & / and
+        s = s.replace(" & ", " and ")
+        # Remove trailing 's' for simple singular/plural
+        if s.endswith("s") and not s.endswith("ss"):
+            s = s[:-1]
+        return s
+
+    def find_by_name(self, name: str) -> Optional[CategoryResponse]:
+        """Case-insensitive lookup of a category by name with fuzzy matching."""
+        normalized = self._normalize_category_name(name)
+        categories = self.get_all()
+        for cat in categories:
+            if self._normalize_category_name(cat.name) == normalized:
+                return cat
+        return None
+
+    def find_or_create(
+        self,
+        name: str,
+        group_name: str = "Other",
+        emoji: Optional[str] = None,
+    ) -> CategoryResponse:
+        """Look up a category by name; create it if missing."""
+        existing = self.find_by_name(name)
+        if existing:
+            return existing
+
+        # Map group_name string to CategoryGroup enum
+        try:
+            group = CategoryGroup(group_name)
+        except ValueError:
+            group = CategoryGroup.OTHER
+
+        return self.create(CategoryCreate(
+            name=name,
+            emoji=emoji,
+            group_name=group,
+        ))
 
     def _parent_exists(self, parent_id: str) -> bool:
         with get_db() as conn:

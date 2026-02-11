@@ -7,7 +7,6 @@ import {
   fetchAccounts,
   fetchCategories,
   triggerCategorization,
-  triggerEnrichment,
   nlSearch,
   TransactionData,
   TransactionFiltersData,
@@ -105,7 +104,6 @@ const TransactionsView: React.FC = () => {
   // Selection state
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isCategorizing, setIsCategorizing] = useState(false);
-  const [isEnriching, setIsEnriching] = useState(false);
 
   // Date preset state
   const [activePreset, setActivePreset] = useState<string | null>(null);
@@ -330,21 +328,6 @@ const TransactionsView: React.FC = () => {
     setEditingField(null);
   };
 
-  const handleReviewToggle = async (transaction: TransactionData) => {
-    try {
-      const newReviewed = !transaction.reviewed;
-      await updateTransaction(transaction.id, { reviewed: newReviewed });
-      setTransactions((prev) =>
-        prev.map((t) =>
-          t.id === transaction.id
-            ? { ...t, reviewed: newReviewed, reviewed_at: newReviewed ? new Date().toISOString() : null }
-            : t
-        )
-      );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update review status');
-    }
-  };
 
   const handleDelete = async (transactionId: string) => {
     try {
@@ -388,8 +371,8 @@ const TransactionsView: React.FC = () => {
     setSelectedIds(new Set());
   };
 
-  // AI Categorization handler
-  const handleAICategorize = async () => {
+  // AI Classify handler (unified categorization + enrichment)
+  const handleAIClassify = async () => {
     if (selectedIds.size === 0) return;
 
     try {
@@ -405,41 +388,19 @@ const TransactionsView: React.FC = () => {
       await loadTransactions();
       clearSelection();
 
-      // Show success message (could be a toast, but using error state for simplicity)
-      const categorized = result.success_count;
-      if (categorized > 0) {
-        // Temporarily show success in a non-blocking way
-        console.log(`Categorized ${categorized} transaction(s)`);
+      // Refresh categories if new ones were created by AI
+      if (result.categories_created_count > 0) {
+        const categoriesData = await fetchCategories();
+        setCategories(categoriesData);
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to categorize transactions');
-    } finally {
-      setIsCategorizing(false);
-    }
-  };
-
-  // AI Enrichment handler
-  const handleAIEnrich = async () => {
-    if (selectedIds.size === 0) return;
-
-    try {
-      setIsEnriching(true);
-      setError(null);
-
-      const result = await triggerEnrichment({
-        transaction_ids: Array.from(selectedIds),
-      });
-
-      await loadTransactions();
-      clearSelection();
 
       if (result.success_count > 0) {
-        console.log(`Enriched ${result.success_count} transaction(s)`);
+        console.log(`Classified ${result.success_count} transaction(s)`);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to enrich transactions');
+      setError(err instanceof Error ? err.message : 'Failed to classify transactions');
     } finally {
-      setIsEnriching(false);
+      setIsCategorizing(false);
     }
   };
 
@@ -790,7 +751,7 @@ const TransactionsView: React.FC = () => {
           </div>
           <div className="flex items-center space-x-3">
             <button
-              onClick={handleAICategorize}
+              onClick={handleAIClassify}
               disabled={isCategorizing}
               className="flex items-center space-x-2 px-4 py-2 text-sm font-semibold text-white bg-purple-600 hover:bg-purple-500 disabled:bg-purple-600/50 disabled:cursor-not-allowed rounded-xl transition-colors"
             >
@@ -800,36 +761,14 @@ const TransactionsView: React.FC = () => {
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                   </svg>
-                  <span>Categorizing...</span>
+                  <span>Classifying...</span>
                 </>
               ) : (
                 <>
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                   </svg>
-                  <span>AI Categorize</span>
-                </>
-              )}
-            </button>
-            <button
-              onClick={handleAIEnrich}
-              disabled={isEnriching}
-              className="flex items-center space-x-2 px-4 py-2 text-sm font-semibold text-white bg-teal-600 hover:bg-teal-500 disabled:bg-teal-600/50 disabled:cursor-not-allowed rounded-xl transition-colors"
-            >
-              {isEnriching ? (
-                <>
-                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                  </svg>
-                  <span>Enriching...</span>
-                </>
-              ) : (
-                <>
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
-                  </svg>
-                  <span>AI Enrich</span>
+                  <span>AI Classify</span>
                 </>
               )}
             </button>
@@ -973,50 +912,30 @@ const TransactionsView: React.FC = () => {
                 <tr
                   key={transaction.id}
                   className={`group hover:bg-white/5 transition-colors ${
-                    transaction.reviewed ? 'opacity-60' : ''
-                  } ${selectedIds.has(transaction.id) ? 'bg-blue-500/10' : ''}`}
+                    selectedIds.has(transaction.id) ? 'bg-blue-500/10' : ''
+                  }`}
                 >
-                  {/* Selection Checkbox + Review Status */}
+                  {/* Selection Checkbox */}
                   <td className="py-3 px-4">
-                    <div className="flex items-center space-x-2">
-                      <button
-                        onClick={() => toggleSelection(transaction.id)}
-                        className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
-                          selectedIds.has(transaction.id)
-                            ? 'bg-blue-500 border-blue-500 text-white'
-                            : 'border-gray-600 hover:border-gray-400'
-                        }`}
-                        title="Select for bulk actions"
-                      >
-                        {selectedIds.has(transaction.id) && (
-                          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                            <path
-                              fillRule="evenodd"
-                              d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                              clipRule="evenodd"
-                            />
-                          </svg>
-                        )}
-                      </button>
-                      {/* Review toggle */}
-                      <button
-                        onClick={() => handleReviewToggle(transaction)}
-                        className={`transition-colors ${
-                          transaction.reviewed
-                            ? 'text-green-500 hover:text-green-400'
-                            : 'text-gray-600 hover:text-gray-400'
-                        }`}
-                        title={transaction.reviewed ? 'Mark as unreviewed' : 'Mark as reviewed'}
-                      >
-                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                          {transaction.reviewed ? (
-                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                          ) : (
-                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm0-2a6 6 0 100-12 6 6 0 000 12z" clipRule="evenodd" />
-                          )}
+                    <button
+                      onClick={() => toggleSelection(transaction.id)}
+                      className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
+                        selectedIds.has(transaction.id)
+                          ? 'bg-blue-500 border-blue-500 text-white'
+                          : 'border-gray-600 hover:border-gray-400'
+                      }`}
+                      title="Select for bulk actions"
+                    >
+                      {selectedIds.has(transaction.id) && (
+                        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                          <path
+                            fillRule="evenodd"
+                            d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                            clipRule="evenodd"
+                          />
                         </svg>
-                      </button>
-                    </div>
+                      )}
+                    </button>
                   </td>
 
                   {/* Date */}

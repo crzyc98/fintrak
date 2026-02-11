@@ -3,7 +3,7 @@ import logging
 from typing import Optional
 from datetime import datetime, date
 
-from app.database import get_db
+from app.database import get_db, safe_update_transaction
 from app.models.transaction import (
     TransactionCreate,
     TransactionUpdate,
@@ -311,37 +311,12 @@ class TransactionService:
         if not updates:
             return existing
 
-        # DuckDB has a known bug where UPDATE on tables with primary key
-        # indexes throws spurious "duplicate key" errors. Work around it
-        # with DELETE + INSERT.
         with get_db() as conn:
-            row = conn.execute(
-                """SELECT id, account_id, date, description, original_description,
-                          amount, category_id, reviewed, reviewed_at, notes,
-                          normalized_merchant, confidence_score, categorization_source,
-                          subcategory, is_discretionary, enrichment_source,
-                          created_at
-                   FROM transactions WHERE id = ?""",
-                [transaction_id],
-            ).fetchone()
-
-            # Apply updates to a mutable copy
-            cols = ["id", "account_id", "date", "description", "original_description",
-                    "amount", "category_id", "reviewed", "reviewed_at", "notes",
-                    "normalized_merchant", "confidence_score", "categorization_source",
-                    "subcategory", "is_discretionary", "enrichment_source",
-                    "created_at"]
-            row_dict = dict(zip(cols, row))
-
+            updates_dict = {}
             for clause, val in zip(updates, values):
                 col_name = clause.split(" = ")[0].strip()
-                row_dict[col_name] = val
-
-            conn.execute("DELETE FROM transactions WHERE id = ?", [transaction_id])
-            conn.execute(
-                f"INSERT INTO transactions ({', '.join(cols)}) VALUES ({', '.join(['?'] * len(cols))})",
-                [row_dict[c] for c in cols],
-            )
+                updates_dict[col_name] = val
+            safe_update_transaction(conn, transaction_id, updates_dict)
 
         # If category changed and transaction has normalized_merchant, create a merchant rule
         if category_changed and new_category_id and existing.normalized_merchant:
