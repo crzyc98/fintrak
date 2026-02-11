@@ -6,7 +6,9 @@ for both categorization and enrichment in a single pass.
 import json
 import logging
 import re
+import threading
 import uuid
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 
@@ -20,6 +22,7 @@ from app.models.categorization import (
     UnifiedAIResult,
     CategorizationBatchResponse,
     CategorizationTriggerRequest,
+    BatchProgressResponse,
 )
 from app.services.gemini_client import (
     invoke_and_parse,
@@ -60,22 +63,58 @@ def _sanitize_for_ai(description: str) -> str:
     return result
 
 
+@dataclass
+class BatchJobState:
+    """In-memory state for a running/completed batch classification job."""
+    batch_id: str
+    status: str = "running"  # running | completed | failed
+    total_transactions: int = 0
+    processed_transactions: int = 0
+    success_count: int = 0
+    failure_count: int = 0
+    skipped_count: int = 0
+    rule_match_count: int = 0
+    desc_rule_match_count: int = 0
+    ai_match_count: int = 0
+    error_message: str | None = None
+    started_at: datetime = field(default_factory=datetime.utcnow)
+    completed_at: datetime | None = None
+
+
+_active_jobs: dict[str, BatchJobState] = {}
+_job_lock = threading.Lock()
+
+
 class CategorizationService:
     """Service for unified AI-powered transaction classification."""
+
+    def get_unclassified_count(self) -> int:
+        """Get count of transactions needing classification."""
+        with get_db() as conn:
+            result = conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM transactions
+                WHERE category_id IS NULL OR enrichment_source IS NULL
+                """
+            ).fetchone()
+        return result[0] if result else 0
 
     def get_unclassified_transactions(
         self,
         transaction_ids: Optional[list[str]] = None,
-        limit: int = 1000,
+        limit: Optional[int] = 1000,
     ) -> list[dict]:
         """
         Get transactions that need classification (categorization OR enrichment).
 
         Returns transactions where category_id IS NULL OR enrichment_source IS NULL.
+        Pass limit=None to fetch all (used by batch classify).
         """
         with get_db() as conn:
             if transaction_ids:
                 placeholders = ",".join(["?" for _ in transaction_ids])
+                limit_clause = f"LIMIT {limit}" if limit is not None else ""
                 query = f"""
                     SELECT id, description, original_description, amount,
                            normalized_merchant, account_id, category_id
@@ -83,19 +122,20 @@ class CategorizationService:
                     WHERE (category_id IS NULL OR enrichment_source IS NULL)
                     AND id IN ({placeholders})
                     ORDER BY date DESC
-                    LIMIT ?
+                    {limit_clause}
                 """
-                params = transaction_ids + [limit]
+                params = transaction_ids
             else:
-                query = """
+                limit_clause = f"LIMIT {limit}" if limit is not None else ""
+                query = f"""
                     SELECT id, description, original_description, amount,
                            normalized_merchant, account_id, category_id
                     FROM transactions
                     WHERE (category_id IS NULL OR enrichment_source IS NULL)
                     ORDER BY date DESC
-                    LIMIT ?
+                    {limit_clause}
                 """
-                params = [limit]
+                params = []
 
             result = conn.execute(query, params).fetchall()
 
@@ -338,10 +378,173 @@ Only respond with the JSON array, no additional text."""
         request: Optional[CategorizationTriggerRequest] = None,
     ) -> CategorizationBatchResponse:
         """
-        Trigger unified classification for transactions.
+        Trigger unified classification for transactions (synchronous).
 
-        Applies learned rules first, then sends remaining to AI in batches
-        for both categorization and enrichment.
+        Used by existing callers (CSV import, review page).
+        Applies learned rules first, then sends remaining to AI in batches.
+        """
+        return self._run_classification(request)
+
+    def trigger_batch_classification(
+        self,
+        request: Optional[CategorizationTriggerRequest] = None,
+    ) -> dict:
+        """
+        Trigger batch classification in a background thread.
+
+        Returns dict with batch_id, total_transactions, and status.
+        Raises ValueError if a job is already running or API key is missing.
+        """
+        from app.config import GEMINI_API_KEY
+
+        if not GEMINI_API_KEY:
+            raise ValueError("GEMINI_API_KEY environment variable is not set")
+
+        # Check for concurrent job
+        with _job_lock:
+            for job in _active_jobs.values():
+                if job.status == "running":
+                    raise RuntimeError(f"A batch job is already running (batch_id={job.batch_id})")
+
+        transaction_ids = request.transaction_ids if request else None
+        # No limit for batch classify — process ALL unclassified transactions
+        limit = None if transaction_ids is None else 1000
+        transactions = self.get_unclassified_transactions(
+            transaction_ids, limit=limit
+        )
+        total_count = len(transactions)
+
+        if total_count == 0:
+            batch_id = str(uuid.uuid4())
+            return {
+                "batch_id": batch_id,
+                "total_transactions": 0,
+                "status": "completed",
+            }
+
+        batch_id = batch_service.create_batch(
+            import_id=None,
+            transaction_count=total_count,
+        )
+
+        batch_size = None
+        if request and request.batch_size is not None:
+            batch_size = request.batch_size
+
+        job_state = BatchJobState(
+            batch_id=batch_id,
+            status="running",
+            total_transactions=total_count,
+            started_at=datetime.utcnow(),
+        )
+        with _job_lock:
+            _active_jobs[batch_id] = job_state
+
+        force_ai = request.force_ai if request else False
+
+        thread = threading.Thread(
+            target=self._run_background_classification,
+            args=(batch_id, transactions, force_ai, batch_size),
+            daemon=True,
+        )
+        thread.start()
+
+        return {
+            "batch_id": batch_id,
+            "total_transactions": total_count,
+            "status": "running",
+        }
+
+    def get_batch_progress(self, batch_id: str) -> Optional[BatchProgressResponse]:
+        """Get progress of a batch job from in-memory state."""
+        job = _active_jobs.get(batch_id)
+        if not job:
+            return None
+        return BatchProgressResponse(
+            batch_id=job.batch_id,
+            status=job.status,
+            total_transactions=job.total_transactions,
+            processed_transactions=job.processed_transactions,
+            success_count=job.success_count,
+            failure_count=job.failure_count,
+            skipped_count=job.skipped_count,
+            rule_match_count=job.rule_match_count,
+            desc_rule_match_count=job.desc_rule_match_count,
+            ai_match_count=job.ai_match_count,
+            error_message=job.error_message,
+            started_at=job.started_at,
+            completed_at=job.completed_at,
+        )
+
+    def _run_background_classification(
+        self,
+        batch_id: str,
+        transactions: list[dict],
+        force_ai: bool,
+        batch_size: Optional[int],
+    ) -> None:
+        """Run classification in background thread, updating BatchJobState."""
+        job = _active_jobs[batch_id]
+
+        try:
+            categories = self.get_all_categories()
+
+            # Apply rules first (unless force_ai) — only to uncategorized transactions
+            uncategorized = [t for t in transactions if not t.get("category_id")]
+            already_categorized = [t for t in transactions if t.get("category_id")]
+
+            remaining_transactions = uncategorized
+            if not force_ai and uncategorized:
+                remaining_transactions, rule_matches, desc_rule_matches = self._apply_rules(uncategorized)
+                job.rule_match_count = rule_matches
+                job.desc_rule_match_count = desc_rule_matches
+                job.success_count += rule_matches + desc_rule_matches
+                job.processed_transactions += rule_matches + desc_rule_matches
+
+            # Combine: uncategorized remaining + already-categorized needing enrichment
+            ai_transactions = remaining_transactions + already_categorized
+
+            if ai_transactions:
+                ai_results = self._process_ai_batches(
+                    ai_transactions, categories, job_state=job, batch_size_override=batch_size
+                )
+                job.ai_match_count = ai_results["success"]
+                job.skipped_count += ai_results["skipped"]
+                job.failure_count += ai_results["failure"]
+                job.success_count += ai_results["success"]
+
+            job.status = "completed"
+            job.completed_at = datetime.utcnow()
+
+        except Exception as e:
+            logger.exception(
+                f"[CLASSIFICATION] Background batch {batch_id} failed: {_sanitize_for_log(str(e))}",
+            )
+            job.status = "failed"
+            job.error_message = str(e)
+            job.failure_count = job.total_transactions - job.success_count
+            job.completed_at = datetime.utcnow()
+
+        # Persist final results to database
+        batch_service.complete_batch(
+            batch_id,
+            job.success_count,
+            job.failure_count,
+            job.rule_match_count,
+            job.desc_rule_match_count,
+            job.ai_match_count,
+            job.skipped_count,
+            job.error_message,
+        )
+
+    def _run_classification(
+        self,
+        request: Optional[CategorizationTriggerRequest] = None,
+    ) -> CategorizationBatchResponse:
+        """
+        Run classification synchronously (original behavior).
+
+        Used by CSV import and review page triggers.
         """
         started_at = datetime.utcnow()
 
@@ -544,9 +747,15 @@ Only respond with the JSON array, no additional text."""
         self,
         transactions: list[dict],
         categories: list[dict],
+        job_state: Optional[BatchJobState] = None,
+        batch_size_override: Optional[int] = None,
     ) -> dict:
         """
         Process transactions in batches with unified AI classification.
+
+        Args:
+            job_state: If provided, update this in-memory state after each sub-batch.
+            batch_size_override: If provided, use this instead of CATEGORIZATION_BATCH_SIZE.
 
         Returns:
             Dict with 'success', 'skipped', 'failure', 'categories_created' counts
@@ -555,6 +764,8 @@ Only respond with the JSON array, no additional text."""
         skipped_total = 0
         failure_total = 0
         categories_created_total = 0
+
+        batch_size = batch_size_override if batch_size_override is not None else CATEGORIZATION_BATCH_SIZE
 
         # Filter out transactions with empty descriptions
         processable = []
@@ -569,6 +780,9 @@ Only respond with the JSON array, no additional text."""
                     }
                 )
                 skipped_total += 1
+                if job_state:
+                    job_state.skipped_count += 1
+                    job_state.processed_transactions += 1
             else:
                 processable.append(tx)
 
@@ -582,35 +796,40 @@ Only respond with the JSON array, no additional text."""
 
         transactions = processable
 
-        for i in range(0, len(transactions), CATEGORIZATION_BATCH_SIZE):
-            batch = transactions[i:i + CATEGORIZATION_BATCH_SIZE]
-            batch_num = (i // CATEGORIZATION_BATCH_SIZE) + 1
-            total_batches = (len(transactions) + CATEGORIZATION_BATCH_SIZE - 1) // CATEGORIZATION_BATCH_SIZE
+        for i in range(0, len(transactions), batch_size):
+            sub_batch = transactions[i:i + batch_size]
+            batch_num = (i // batch_size) + 1
+            total_batches = (len(transactions) + batch_size - 1) // batch_size
 
-            logger.info(f"Processing batch {batch_num}/{total_batches} ({len(batch)} transactions)")
+            logger.info(f"Processing batch {batch_num}/{total_batches} ({len(sub_batch)} transactions)")
 
             try:
-                # Count categories before to detect new ones
-                cats_before = len(categories)
-                results = self.classify_batch(batch, categories)
+                results = self.classify_batch(sub_batch, categories)
 
                 if results:
-                    success, skipped, created = self.apply_unified_results(results, batch)
+                    success, skipped, created = self.apply_unified_results(results, sub_batch)
                     success_total += success
                     skipped_total += skipped
                     categories_created_total += created
-                    failure_total += len(batch) - len(results)
+                    failure_total += len(sub_batch) - len(results)
+
+                    if job_state:
+                        job_state.processed_transactions += len(sub_batch)
 
                     # If new categories were created, refresh the list for subsequent batches
                     if created > 0:
                         categories = self.get_all_categories()
                 else:
-                    failure_total += len(batch)
+                    failure_total += len(sub_batch)
+                    if job_state:
+                        job_state.processed_transactions += len(sub_batch)
                     logger.warning(f"Batch {batch_num} returned no results")
 
             except Exception as e:
                 logger.exception(f"Batch {batch_num} failed: {e}")
-                failure_total += len(batch)
+                failure_total += len(sub_batch)
+                if job_state:
+                    job_state.processed_transactions += len(sub_batch)
 
         return {
             "success": success_total,

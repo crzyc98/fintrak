@@ -134,6 +134,36 @@ class CategorizationTriggerRequest(BaseModel):
     """Request body for triggering categorization"""
     transaction_ids: Optional[list[str]] = None
     force_ai: bool = False
+    batch_size: Optional[int] = Field(None, ge=10, le=200)
+
+
+class BatchTriggerResponse(BaseModel):
+    """Response from triggering a background batch classification job"""
+    batch_id: str
+    total_transactions: int
+    status: Literal["running", "completed"]
+
+
+class UnclassifiedCountResponse(BaseModel):
+    """Response for unclassified transaction count"""
+    count: int
+
+
+class BatchProgressResponse(BaseModel):
+    """Real-time progress of a batch classification job"""
+    batch_id: str
+    status: Literal["running", "completed", "failed"]
+    total_transactions: int
+    processed_transactions: int
+    success_count: int
+    failure_count: int
+    skipped_count: int
+    rule_match_count: int
+    desc_rule_match_count: int
+    ai_match_count: int
+    error_message: Optional[str] = None
+    started_at: datetime
+    completed_at: Optional[datetime] = None
 
 
 class NormalizationRequest(BaseModel):

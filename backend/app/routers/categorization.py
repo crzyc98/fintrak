@@ -3,6 +3,7 @@ API endpoints for AI-powered transaction categorization.
 """
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, model_validator
 
 from app.models.categorization import (
@@ -17,6 +18,9 @@ from app.models.categorization import (
     PatternPreviewResponse,
     NormalizationRequest,
     NormalizationResponse,
+    BatchTriggerResponse,
+    UnclassifiedCountResponse,
+    BatchProgressResponse,
 )
 from app.services.categorization_service import categorization_service
 from app.services.rule_service import rule_service
@@ -69,23 +73,53 @@ async def get_batch(batch_id: str) -> CategorizationBatchResponse:
     return batch
 
 
-@router.post("/trigger", response_model=CategorizationBatchResponse)
+@router.get("/unclassified-count", response_model=UnclassifiedCountResponse)
+async def get_unclassified_count() -> UnclassifiedCountResponse:
+    """Get count of transactions needing classification."""
+    count = categorization_service.get_unclassified_count()
+    return UnclassifiedCountResponse(count=count)
+
+
+@router.get("/batches/{batch_id}/progress", response_model=BatchProgressResponse)
+async def get_batch_progress(batch_id: str) -> BatchProgressResponse:
+    """Get real-time progress of a batch classification job."""
+    progress = categorization_service.get_batch_progress(batch_id)
+    if not progress:
+        raise HTTPException(status_code=404, detail="Batch not found or no progress tracked")
+    return progress
+
+
+@router.post("/trigger")
 async def trigger_categorization(
     request: Optional[CategorizationTriggerRequest] = None,
-) -> CategorizationBatchResponse:
+):
     """
     Trigger AI categorization for uncategorized transactions.
 
-    Applies learned rules first, then sends remaining transactions to AI.
-    Returns batch processing results.
+    When called with transaction_ids (from review page / CSV import), runs
+    synchronously and returns CategorizationBatchResponse.
 
-    Args:
-        request: Optional request body with specific transaction IDs or force_ai flag
-
-    Returns:
-        CategorizationBatchResponse with processing results
+    When called without transaction_ids (batch classify from Settings),
+    starts background processing and returns BatchTriggerResponse with HTTP 202.
+    Returns HTTP 409 if a batch job is already running.
     """
-    return categorization_service.trigger_categorization(request)
+    # If specific transaction_ids are given, use synchronous path (existing behavior)
+    if request and request.transaction_ids:
+        return categorization_service.trigger_categorization(request)
+
+    # Batch classify path — background processing
+    try:
+        result = categorization_service.trigger_batch_classification(request)
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    status_code = 202 if result["status"] == "running" else 200
+    return JSONResponse(
+        content=result,
+        status_code=status_code,
+    )
 
 
 # ============================================================================

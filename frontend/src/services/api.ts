@@ -262,6 +262,29 @@ export async function deleteTransaction(id: string): Promise<void> {
 export interface CategorizationTriggerRequestData {
   transaction_ids?: string[];
   force_ai?: boolean;
+  batch_size?: number;
+}
+
+export interface BatchTriggerResponseData {
+  batch_id: string;
+  total_transactions: number;
+  status: 'running' | 'completed';
+}
+
+export interface BatchProgressResponseData {
+  batch_id: string;
+  status: 'running' | 'completed' | 'failed';
+  total_transactions: number;
+  processed_transactions: number;
+  success_count: number;
+  failure_count: number;
+  skipped_count: number;
+  rule_match_count: number;
+  desc_rule_match_count: number;
+  ai_match_count: number;
+  error_message: string | null;
+  started_at: string;
+  completed_at: string | null;
 }
 
 export interface CategorizationBatchResponseData {
@@ -294,6 +317,40 @@ export async function triggerCategorization(
     method: 'POST',
     body: request ? JSON.stringify(request) : undefined,
   });
+}
+
+export async function triggerBatchClassification(
+  batchSize?: number
+): Promise<BatchTriggerResponseData> {
+  const body: CategorizationTriggerRequestData = {};
+  if (batchSize !== undefined) {
+    body.batch_size = batchSize;
+  }
+  const response = await fetch(`${API_BASE_URL}/api/categorization/trigger`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    const message = typeof error.detail === 'string' ? error.detail : `HTTP ${response.status}`;
+    throw new Error(message);
+  }
+
+  return response.json();
+}
+
+export async function getUnclassifiedCount(): Promise<{ count: number }> {
+  return fetchApi<{ count: number }>('/api/categorization/unclassified-count');
+}
+
+export async function getBatchProgress(
+  batchId: string
+): Promise<BatchProgressResponseData> {
+  return fetchApi<BatchProgressResponseData>(
+    `/api/categorization/batches/${batchId}/progress`
+  );
 }
 
 export async function listBatches(
