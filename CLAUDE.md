@@ -71,7 +71,7 @@ DuckDB embedded database at project root (`fintrak.duckdb`). Schema managed via 
 - `GEMINI_API_KEY` - Google AI Studio API key (get from https://aistudio.google.com/apikey)
 
 **Optional:**
-- `GEMINI_MODEL` - Model to use (default: `gemini-1.5-flash`)
+- `GEMINI_MODEL` - Model to use (default: `gemini-2.5-flash-lite`)
 - `CATEGORIZATION_BATCH_SIZE` - Transactions per AI batch (default: 50)
 - `CATEGORIZATION_TIMEOUT_SECONDS` - API timeout (default: 120)
 

@@ -91,7 +91,7 @@ Get a key at https://aistudio.google.com/apikey. Optional settings:
 
 | Variable | Default | Description |
 |---|---|---|
-| `GEMINI_MODEL` | `gemini-1.5-flash` | Gemini model to use |
+| `GEMINI_MODEL` | `gemini-2.5-flash-lite` | Gemini model to use |
 | `CATEGORIZATION_BATCH_SIZE` | `50` | Transactions per AI batch |
 | `CATEGORIZATION_TIMEOUT_SECONDS` | `120` | API timeout |
 
