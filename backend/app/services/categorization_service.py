@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Optional
 
 from app.config import (
+    AUTO_RULE_CONFIDENCE_THRESHOLD,
     CATEGORIZATION_BATCH_SIZE,
     CATEGORIZATION_CONFIDENCE_THRESHOLD,
 )
@@ -342,7 +343,127 @@ Only respond with the JSON array, no additional text."""
                     safe_update_transaction(conn, result.transaction_id, updates)
                     success_count += 1
 
+        # Auto-create rules from high-confidence AI results
+        self._create_rules_from_ai_results(results, transactions)
+
         return success_count, skipped_count, categories_created
+
+    def _create_rules_from_ai_results(
+        self,
+        results: list[UnifiedAIResult],
+        transactions: list[dict],
+    ) -> None:
+        """
+        Auto-create categorization rules from high-confidence AI results.
+
+        Creates merchant rules for results with normalized_merchant, and
+        description pattern rules for results without. Skips if a rule
+        already exists for the merchant/pattern (no upsert).
+        """
+        from app.services.rule_service import rule_service
+        from app.services.desc_rule_service import desc_rule_service
+        from app.services.pattern_extractor import extract_pattern
+        from app.models.categorization import (
+            CategorizationRuleCreate,
+            DescriptionPatternRuleCreate,
+        )
+
+        # Build lookup: transaction_id -> transaction dict
+        tx_lookup = {tx["id"]: tx for tx in transactions}
+        # Build lookup: transaction_id -> whether category was assigned (not just enrichment)
+        tx_category_map = {tx["id"]: tx.get("category_id") for tx in transactions}
+
+        # Collect high-confidence candidates, grouped by merchant
+        merchant_candidates: dict[str, UnifiedAIResult] = {}  # normalized_merchant -> best result
+        desc_candidates: list[tuple[UnifiedAIResult, dict]] = []  # (result, tx) pairs
+
+        for result in results:
+            if result.confidence < AUTO_RULE_CONFIDENCE_THRESHOLD:
+                continue
+
+            # Only create rules for results where category was actually assigned
+            # (not just enrichment for already-categorized transactions)
+            existing_category = tx_category_map.get(result.transaction_id)
+            if existing_category:
+                continue
+
+            tx = tx_lookup.get(result.transaction_id)
+            if not tx:
+                continue
+
+            if result.normalized_merchant:
+                merchant_key = result.normalized_merchant.strip().lower()
+                existing_best = merchant_candidates.get(merchant_key)
+                if not existing_best or result.confidence > existing_best.confidence:
+                    merchant_candidates[merchant_key] = result
+            else:
+                desc_candidates.append((result, tx))
+
+        merchant_rules_created = 0
+        desc_rules_created = 0
+
+        # Create merchant rules
+        for merchant_key, result in merchant_candidates.items():
+            try:
+                existing_rule = rule_service.find_matching_rule(result.normalized_merchant)
+                if existing_rule:
+                    continue
+
+                cat = category_service.find_by_name(result.category_name)
+                if not cat:
+                    continue
+
+                rule_data = CategorizationRuleCreate(
+                    merchant_pattern=result.normalized_merchant,
+                    category_id=cat.id,
+                    source="ai",
+                )
+                rule_service.create_rule(rule_data)
+                merchant_rules_created += 1
+            except Exception as e:
+                logger.warning(
+                    f"Failed to auto-create merchant rule for '{result.normalized_merchant}': {e}"
+                )
+
+        # Create description pattern rules
+        for result, tx in desc_candidates:
+            try:
+                description = tx.get("description", "")
+                account_id = tx.get("account_id", "")
+                if not description or not account_id:
+                    continue
+
+                pattern = extract_pattern(description)
+                # Validate pattern is specific enough
+                if not pattern or pattern == "*" or len(pattern.replace("*", "").strip()) < 3:
+                    continue
+
+                existing_rule = desc_rule_service.find_matching_rule(description, account_id)
+                if existing_rule:
+                    continue
+
+                cat = category_service.find_by_name(result.category_name)
+                if not cat:
+                    continue
+
+                rule_data = DescriptionPatternRuleCreate(
+                    description_pattern=pattern,
+                    account_id=account_id,
+                    category_id=cat.id,
+                    source="ai",
+                )
+                desc_rule_service.create_rule(rule_data)
+                desc_rules_created += 1
+            except Exception as e:
+                logger.warning(
+                    f"Failed to auto-create desc rule for transaction {result.transaction_id}: {e}"
+                )
+
+        if merchant_rules_created or desc_rules_created:
+            logger.info(
+                f"[CLASSIFICATION] Auto-created {merchant_rules_created} merchant rules "
+                f"and {desc_rules_created} description rules from AI results"
+            )
 
     def apply_categorization_results(
         self,

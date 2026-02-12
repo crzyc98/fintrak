@@ -84,11 +84,10 @@ The app uses Google Gemini API for transaction categorization:
 - Retry logic: Exponential backoff (2s, 4s, 8s delays)
 
 ## Recent Changes
+- 015-auto-ai-rules: Added Python 3.12 + FastAPI 0.115.6, Pydantic 2.10.4, google-genai (Gemini)
 - 014-batch-classify: Added Python 3.12 (backend), TypeScript 5.8.2 (frontend) + FastAPI 0.115.6, React 19.2.3, Pydantic 2.10.4, google-genai (Gemini)
 - 013-fix-enrichment-update: Added Python 3.12 + FastAPI 0.115.6, DuckDB 1.1.3, Pydantic 2.10.4
-- 011-nl-transaction-search: Added Python 3.12 (backend), TypeScript 5.8.2 (frontend) + FastAPI 0.115.6, React 19.2.3, google-genai (Gemini), Pydantic 2.10.4, Tailwind CSS
 
 
 ## Active Technologies
-- Python 3.12 (backend), TypeScript 5.8.2 (frontend) + FastAPI 0.115.6, React 19.2.3, Pydantic 2.10.4, google-genai (Gemini) (014-batch-classify)
-- DuckDB 1.1.3 (file-based: `fintrak.duckdb`) — no schema changes needed (014-batch-classify)
+- Python 3.12 + FastAPI 0.115.6, Pydantic 2.10.4, google-genai (Gemini) (015-auto-ai-rules)
