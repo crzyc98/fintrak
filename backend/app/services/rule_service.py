@@ -46,16 +46,18 @@ class RuleService:
                 [normalized_pattern],
             ).fetchone()
 
+            source = data.source or "manual"
+
             if existing:
                 # Update existing rule
                 rule_id = existing[0]
                 conn.execute(
                     """
                     UPDATE categorization_rules
-                    SET category_id = ?, created_at = ?
+                    SET category_id = ?, created_at = ?, source = ?
                     WHERE id = ?
                     """,
-                    [data.category_id, datetime.utcnow(), rule_id],
+                    [data.category_id, datetime.utcnow(), source, rule_id],
                 )
                 logger.info(
                     f"Updated rule '{normalized_pattern}' -> category {data.category_id}"
@@ -65,10 +67,10 @@ class RuleService:
                 rule_id = str(uuid.uuid4())
                 conn.execute(
                     """
-                    INSERT INTO categorization_rules (id, merchant_pattern, category_id, created_at)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO categorization_rules (id, merchant_pattern, category_id, created_at, source)
+                    VALUES (?, ?, ?, ?, ?)
                     """,
-                    [rule_id, normalized_pattern, data.category_id, datetime.utcnow()],
+                    [rule_id, normalized_pattern, data.category_id, datetime.utcnow(), source],
                 )
                 logger.info(
                     f"Created rule '{normalized_pattern}' -> category {data.category_id}"
@@ -98,7 +100,7 @@ class RuleService:
                 result = conn.execute(
                     """
                     SELECT r.id, r.merchant_pattern, r.category_id, r.created_at,
-                           c.name as category_name
+                           c.name as category_name, r.source
                     FROM categorization_rules r
                     LEFT JOIN categories c ON r.category_id = c.id
                     WHERE r.category_id = ?
@@ -111,7 +113,7 @@ class RuleService:
                 result = conn.execute(
                     """
                     SELECT r.id, r.merchant_pattern, r.category_id, r.created_at,
-                           c.name as category_name
+                           c.name as category_name, r.source
                     FROM categorization_rules r
                     LEFT JOIN categories c ON r.category_id = c.id
                     ORDER BY r.created_at DESC
@@ -127,6 +129,7 @@ class RuleService:
                 category_id=row[2],
                 created_at=row[3],
                 category_name=row[4],
+                source=row[5] or "manual",
             )
             for row in result
         ]
@@ -202,7 +205,7 @@ class RuleService:
             result = conn.execute(
                 """
                 SELECT r.id, r.merchant_pattern, r.category_id, r.created_at,
-                       c.name as category_name
+                       c.name as category_name, r.source
                 FROM categorization_rules r
                 LEFT JOIN categories c ON r.category_id = c.id
                 WHERE r.id = ?
@@ -219,6 +222,7 @@ class RuleService:
             category_id=result[2],
             created_at=result[3],
             category_name=result[4],
+            source=result[5] or "manual",
         )
 
     def delete_rule(self, rule_id: str) -> bool:

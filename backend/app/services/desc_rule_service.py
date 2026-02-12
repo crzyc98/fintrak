@@ -43,6 +43,7 @@ class DescRuleService:
         Patterns are stored lowercase for case-insensitive matching.
         """
         normalized_pattern = data.description_pattern.strip().lower()
+        source = data.source or "manual"
 
         with get_db() as conn:
             existing = conn.execute(
@@ -61,10 +62,10 @@ class DescRuleService:
                 )
                 conn.execute(
                     """INSERT INTO description_pattern_rules
-                       (id, account_id, description_pattern, category_id, created_at)
-                       VALUES (?, ?, ?, ?, ?)""",
+                       (id, account_id, description_pattern, category_id, created_at, source)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
                     [rule_id, data.account_id, normalized_pattern,
-                     data.category_id, datetime.utcnow()],
+                     data.category_id, datetime.utcnow(), source],
                 )
                 logger.info(
                     f"Updated desc rule '{normalized_pattern}' for account {data.account_id} "
@@ -74,10 +75,10 @@ class DescRuleService:
                 rule_id = str(uuid.uuid4())
                 conn.execute(
                     """INSERT INTO description_pattern_rules
-                       (id, account_id, description_pattern, category_id, created_at)
-                       VALUES (?, ?, ?, ?, ?)""",
+                       (id, account_id, description_pattern, category_id, created_at, source)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
                     [rule_id, data.account_id, normalized_pattern,
-                     data.category_id, datetime.utcnow()],
+                     data.category_id, datetime.utcnow(), source],
                 )
                 logger.info(
                     f"Created desc rule '{normalized_pattern}' for account {data.account_id} "
@@ -158,7 +159,8 @@ class DescRuleService:
                 f"""SELECT r.id, r.account_id, r.description_pattern,
                            r.category_id, r.created_at,
                            c.name as category_name,
-                           a.name as account_name
+                           a.name as account_name,
+                           r.source
                     FROM description_pattern_rules r
                     LEFT JOIN categories c ON r.category_id = c.id
                     LEFT JOIN accounts a ON r.account_id = a.id
@@ -177,6 +179,7 @@ class DescRuleService:
                 created_at=row[4],
                 category_name=row[5],
                 account_name=row[6],
+                source=row[7] or "manual",
             )
             for row in result
         ]
@@ -188,7 +191,8 @@ class DescRuleService:
                 """SELECT r.id, r.account_id, r.description_pattern,
                           r.category_id, r.created_at,
                           c.name as category_name,
-                          a.name as account_name
+                          a.name as account_name,
+                          r.source
                    FROM description_pattern_rules r
                    LEFT JOIN categories c ON r.category_id = c.id
                    LEFT JOIN accounts a ON r.account_id = a.id
@@ -207,6 +211,7 @@ class DescRuleService:
             created_at=result[4],
             category_name=result[5],
             account_name=result[6],
+            source=result[7] or "manual",
         )
 
     def delete_rule(self, rule_id: str) -> bool:

@@ -294,3 +294,14 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_transactions_enrichment_source
         ON transactions(enrichment_source)
     """)
+
+    # Migration: Add source column to rule tables for tracking AI-created vs manual rules
+    try:
+        conn.execute("SELECT source FROM categorization_rules LIMIT 1")
+    except duckdb.BinderException:
+        conn.execute("ALTER TABLE categorization_rules ADD COLUMN source VARCHAR(10) DEFAULT 'manual'")
+
+    try:
+        conn.execute("SELECT source FROM description_pattern_rules LIMIT 1")
+    except duckdb.BinderException:
+        conn.execute("ALTER TABLE description_pattern_rules ADD COLUMN source VARCHAR(10) DEFAULT 'manual'")

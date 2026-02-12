@@ -15,6 +15,7 @@ class CategorizationRuleCreate(BaseModel):
     """Model for creating a categorization rule"""
     merchant_pattern: str = Field(..., min_length=1, max_length=255)
     category_id: str
+    source: Optional[str] = "manual"
 
 
 class CategorizationRuleResponse(BaseModel):
@@ -27,6 +28,7 @@ class CategorizationRuleResponse(BaseModel):
     description_pattern: Optional[str] = None
     account_id: Optional[str] = None
     account_name: Optional[str] = None
+    source: str = "manual"
     created_at: datetime
 
     class Config:
@@ -50,6 +52,7 @@ class DescriptionPatternRuleCreate(BaseModel):
     description_pattern: str = Field(..., min_length=1, max_length=500)
     account_id: str
     category_id: str
+    source: Optional[str] = "manual"
 
 
 class DescriptionPatternRuleResponse(BaseModel):
@@ -61,6 +64,7 @@ class DescriptionPatternRuleResponse(BaseModel):
     category_id: str
     category_name: Optional[str] = None
     rule_type: Literal["description"] = "description"
+    source: str = "manual"
     created_at: datetime
 
     class Config:
